@@ -21,6 +21,31 @@
 
 ---
 
+## 💡 Mẹo "0 ĐỒNG" Kinh Điển: Gmail Dot Trick (1 Gmail tạo hàng chục Nick TikTok)
+
+> **Tiêu chí 100% MIỄN PHÍ - KHÔNG TỐN 1 ĐỒNG XU NÀO: Không cần mua acc, không cần thuê sim, không mất phí gì cả.**
+
+### 1. Nguyên lý hoạt động
+- **Google:** Dấu chấm `.` trong địa chỉ Gmail hoàn toàn vô hình đối với Google. Dù gửi vào `conghau20@gmail.com`, `c.onghau20@gmail.com`, `co.nghau20@gmail.com` hay `c.o.n.g.h.a.u20@gmail.com` thì toàn bộ email và mã xác minh OTP đều đổ về **chung 1 hộp thư thật của bạn**.
+- **TikTok:** Thuật toán TikTok coi mỗi dấu chấm là một địa chỉ email riêng biệt hoàn toàn mới.
+- **Vượt mặt yêu cầu số điện thoại:** Đuôi `@gmail.com` là đuôi mail có độ uy tín (trust score) cao nhất thế giới đối với TikTok. Khi đăng ký bằng email có đuôi `@gmail.com`, thuật toán TikTok sẽ ưu tiên thả qua và **KHÔNG BẮT BUỘC số điện thoại**!
+
+### 2. Cách sử dụng trên hệ thống
+1. **Tại trang Quản lý Tài khoản (TikTok Accounts):**
+   - Bấm **"Tự động tạo tài khoản (Auto-Reg)"**.
+   - Chọn tab **"🌟 Mẹo 0đ: Gmail Dot Trick"**.
+   - Nhập Gmail chính của bạn (vd: `conghau20@gmail.com`) và chọn số lượng nick cần tạo (1 - 20 nick).
+   - Hệ thống tự động sinh các biến thể dấu chấm sạch, chưa từng sử dụng trong DB.
+   - Khi tiến trình chạy: Cửa sổ trình duyệt mở lên tự động điền form, bạn chỉ cần kéo mảnh ghép Captcha 1 lần. Mã OTP gửi về Gmail của bạn sẽ được điền tự động hoặc bạn nhập trực tiếp vào Chrome!
+2. **Tại trang Host Mail & Định dạng Email:**
+   - Chuyển sang tab **"Quy tắc tạo Email"**.
+   - Chọn kiểu định dạng: **"🌟 Mẹo 0đ: Gmail Dot Trick"**.
+   - Nhập Gmail và bấm **"Tạo danh sách & Kiểm tra trùng"**.
+   - Xem bảng biến thể, sao chép nhanh hoặc xuất file CSV.
+
+
+---
+
 ## 2. Thiết kế Giao diện (UI/UX)
 
 Giao diện Dashboard Dark Mode cao cấp với bảng màu chuẩn SaaS:

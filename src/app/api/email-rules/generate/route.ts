@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
+import { generateGmailDotVariations, isValidGmail, normalizeGmail } from "@/lib/gmailDotTrick";
 
 export const dynamic = "force-dynamic";
 
@@ -7,7 +8,7 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
     const {
-      formatType = "RANDOM_DOMAIN", // PREFIX_DOMAIN, USERNAME_DOMAIN, RANDOM_DOMAIN, CUSTOM
+      formatType = "RANDOM_DOMAIN", // GMAIL_DOT_TRICK, PREFIX_DOMAIN, USERNAME_DOMAIN, RANDOM_DOMAIN, CUSTOM
       domain,
       prefix = "",
       suffix = "",
@@ -16,52 +17,65 @@ export async function POST(req: Request) {
       allowedChars = "alphanumeric", // alphanumeric, letters_only, numeric_only
       customPattern = "{prefix}_{random}@{domain}",
       quantity = 10,
+      baseGmail = "",
     } = body;
-
-    if (!domain) {
-      return NextResponse.json({ error: "Vui lòng chọn hoặc nhập tên miền (Domain)" }, { status: 400 });
-    }
 
     const count = Math.min(Math.max(1, parseInt(quantity) || 10), 500);
 
-    let charSet = "abcdefghijklmnopqrstuvwxyz0123456789";
-    if (allowedChars === "letters_only") {
-      charSet = "abcdefghijklmnopqrstuvwxyz";
-    } else if (allowedChars === "numeric_only") {
-      charSet = "0123456789";
-    }
+    let generated: string[] = [];
 
-    const generateRandomStr = (len: number): string => {
-      let res = "";
-      for (let i = 0; i < len; i++) {
-        res += charSet.charAt(Math.floor(Math.random() * charSet.length));
+    if (formatType === "GMAIL_DOT_TRICK") {
+      const targetGmail = (baseGmail || `${baseUsername}@gmail.com`).trim().toLowerCase();
+      if (!targetGmail.includes("@")) {
+        return NextResponse.json(
+          { error: "Vui lòng nhập địa chỉ Gmail thật hợp lệ (vd: conghau20@gmail.com)" },
+          { status: 400 }
+        );
       }
-      return res;
-    };
-
-    const generated: string[] = [];
-    for (let i = 0; i < count; i++) {
-      let email = "";
-      const randStr = generateRandomStr(length);
-
-      if (formatType === "PREFIX_DOMAIN") {
-        email = `${prefix ? prefix + "." : ""}${randStr}${suffix ? "." + suffix : ""}@${domain}`;
-      } else if (formatType === "USERNAME_DOMAIN") {
-        const num = (i + 1).toString().padStart(3, "0");
-        email = `${prefix ? prefix + "_" : ""}${baseUsername}${num}${suffix ? "_" + suffix : ""}@${domain}`;
-      } else if (formatType === "CUSTOM") {
-        email = customPattern
-          .replace("{prefix}", prefix)
-          .replace("{suffix}", suffix)
-          .replace("{random}", randStr)
-          .replace("{domain}", domain)
-          .replace("{num}", (i + 1).toString());
-      } else {
-        // RANDOM_DOMAIN
-        email = `${prefix ? prefix + "_" : ""}${randStr}${suffix ? "_" + suffix : ""}@${domain}`;
+      generated = generateGmailDotVariations(targetGmail, count);
+    } else {
+      if (!domain) {
+        return NextResponse.json({ error: "Vui lòng chọn hoặc nhập tên miền (Domain)" }, { status: 400 });
       }
 
-      generated.push(email.toLowerCase());
+      let charSet = "abcdefghijklmnopqrstuvwxyz0123456789";
+      if (allowedChars === "letters_only") {
+        charSet = "abcdefghijklmnopqrstuvwxyz";
+      } else if (allowedChars === "numeric_only") {
+        charSet = "0123456789";
+      }
+
+      const generateRandomStr = (len: number): string => {
+        let res = "";
+        for (let i = 0; i < len; i++) {
+          res += charSet.charAt(Math.floor(Math.random() * charSet.length));
+        }
+        return res;
+      };
+
+      for (let i = 0; i < count; i++) {
+        let email = "";
+        const randStr = generateRandomStr(length);
+
+        if (formatType === "PREFIX_DOMAIN") {
+          email = `${prefix ? prefix + "." : ""}${randStr}${suffix ? "." + suffix : ""}@${domain}`;
+        } else if (formatType === "USERNAME_DOMAIN") {
+          const num = (i + 1).toString().padStart(3, "0");
+          email = `${prefix ? prefix + "_" : ""}${baseUsername}${num}${suffix ? "_" + suffix : ""}@${domain}`;
+        } else if (formatType === "CUSTOM") {
+          email = customPattern
+            .replace("{prefix}", prefix)
+            .replace("{suffix}", suffix)
+            .replace("{random}", randStr)
+            .replace("{domain}", domain)
+            .replace("{num}", (i + 1).toString());
+        } else {
+          // RANDOM_DOMAIN
+          email = `${prefix ? prefix + "_" : ""}${randStr}${suffix ? "_" + suffix : ""}@${domain}`;
+        }
+
+        generated.push(email.toLowerCase());
+      }
     }
 
     // Check duplicates against existing database

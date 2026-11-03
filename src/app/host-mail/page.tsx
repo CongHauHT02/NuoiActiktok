@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import {
   Server,
   Plus,
@@ -18,12 +19,15 @@ import {
   Download,
   Copy,
   Sparkles,
+  ArrowRight,
+  Check,
 } from "lucide-react";
 import { ConnectionBadge } from "@/components/ui/Badge";
 import { Modal } from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
 
 export default function HostMailPage() {
+  const router = useRouter();
   const { success, error: toastError, info } = useToast();
   const [activeTab, setActiveTab] = useState<"hosts" | "generator">("hosts");
   const [loading, setLoading] = useState(true);
@@ -51,11 +55,12 @@ export default function HostMailPage() {
 
   // Generator State
   const [generatorForm, setGeneratorForm] = useState({
-    formatType: "RANDOM_DOMAIN",
+    formatType: "GMAIL_DOT_TRICK",
     domain: "",
     prefix: "",
     suffix: "",
-    baseUsername: "user",
+    baseUsername: "conghau",
+    baseGmail: "conghau20@gmail.com",
     length: 8,
     allowedChars: "alphanumeric",
     customPattern: "{prefix}_{random}@{domain}",
@@ -209,9 +214,42 @@ export default function HostMailPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `emails_${generatorForm.domain}_${Date.now()}.csv`;
+    a.download = `emails_${generatorForm.formatType === "GMAIL_DOT_TRICK" ? "gmail_dot" : generatorForm.domain}_${Date.now()}.csv`;
     a.click();
     success("Đã tải xuống tệp CSV");
+  };
+
+  const handleCopyAllEmails = () => {
+    if (!generatedResults || !generatedResults.data) return;
+    const validEmails = generatedResults.data
+      .filter((r: any) => !r.isDuplicate)
+      .map((r: any) => r.email)
+      .join("\n");
+    if (!validEmails) {
+      toastError("Không có email hợp lệ", "Tất cả email đã bị trùng lặp trong hệ thống");
+      return;
+    }
+    navigator.clipboard.writeText(validEmails);
+    success("Đã sao chép toàn bộ email hợp lệ vào bộ nhớ tạm");
+  };
+
+  const handleSendToAutoReg = () => {
+    if (!generatedResults || !generatedResults.data) return;
+    const validEmails = generatedResults.data
+      .filter((r: any) => !r.isDuplicate)
+      .map((r: any) => r.email);
+
+    if (validEmails.length === 0) {
+      toastError("Không có email hợp lệ để đăng ký");
+      return;
+    }
+
+    if (generatorForm.formatType === "GMAIL_DOT_TRICK") {
+      router.push(`/accounts?action=autoreg&mode=gmail_dot&baseGmail=${encodeURIComponent(generatorForm.baseGmail)}&count=${validEmails.length}`);
+    } else {
+      localStorage.setItem("autoreg_prefilled_emails", validEmails.join("\n"));
+      router.push(`/accounts?action=autoreg&mode=paste`);
+    }
   };
 
   // Filtered hosts
@@ -457,122 +495,182 @@ export default function HostMailPage() {
                 <select
                   value={generatorForm.formatType}
                   onChange={(e) => setGeneratorForm({ ...generatorForm, formatType: e.target.value })}
-                  className="w-full bg-[#111620] border border-border rounded-lg px-3 py-1.5 text-xs text-foreground focus:outline-none focus:border-primary"
+                  className="w-full bg-[#111620] border border-border rounded-lg px-3 py-1.5 text-xs text-foreground focus:outline-none focus:border-primary font-medium"
                 >
-                  <option value="RANDOM_DOMAIN">Random Username + Domain (Khuyên dùng)</option>
+                  <option value="GMAIL_DOT_TRICK">🌟 Mẹo 0đ: Gmail Dot Trick (1 Gmail tạo hàng chục nick)</option>
+                  <option value="RANDOM_DOMAIN">Random Username + Domain (Host Mail)</option>
                   <option value="PREFIX_DOMAIN">Tiền tố (Prefix) + Random + Domain</option>
                   <option value="USERNAME_DOMAIN">Tên gốc (Base) + Số thứ tự + Domain</option>
                   <option value="CUSTOM">Tùy biến mẫu (Custom Pattern)</option>
                 </select>
               </div>
 
-              <div>
-                <label className="text-xs font-medium text-slate-300 block mb-1">Chọn tên miền (Domain)</label>
-                <select
-                  value={generatorForm.domain}
-                  onChange={(e) => setGeneratorForm({ ...generatorForm, domain: e.target.value })}
-                  className="w-full bg-[#111620] border border-border rounded-lg px-3 py-1.5 text-xs text-foreground focus:outline-none focus:border-primary font-mono"
-                >
-                  {hosts.map((h) => (
-                    <option key={h.id} value={h.domain}>
-                      {h.domain} ({h.name})
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {generatorForm.formatType === "GMAIL_DOT_TRICK" ? (
+                <div className="space-y-3">
+                  <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-xs space-y-2">
+                    <p className="font-bold text-emerald-300 flex items-center gap-1.5">
+                      <Sparkles className="w-4 h-4 text-amber-300" />
+                      Mẹo &quot;0 Đồng&quot; Kinh Điển - Gmail Dot Trick
+                    </p>
+                    <ul className="list-disc list-inside space-y-1 text-[11px] text-emerald-200/90 leading-relaxed">
+                      <li><strong>Google bỏ qua dấu chấm:</strong> Dấu chấm <code className="bg-emerald-950 px-1 rounded font-mono">.</code> trong Gmail hoàn toàn vô hình, tất cả mã OTP gửi về CHUNG 1 hộp thư thật của bạn.</li>
+                      <li><strong>TikTok xem mỗi dấu chấm là tài khoản mới:</strong> Bạn có thể tạo hàng chục đến hàng trăm nick TikTok mà không tốn 1 xu.</li>
+                      <li><strong>Không bị bắt SĐT:</strong> Đuôi <code className="bg-emerald-950 px-1 rounded font-mono">@gmail.com</code> có uy tín cao nhất thế giới nên thuật toán TikTok ưu tiên không bắt số điện thoại!</li>
+                    </ul>
+                  </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-medium text-slate-300 block mb-1">Tiền tố (Prefix)</label>
-                  <input
-                    type="text"
-                    placeholder="vd: tt, creator"
-                    value={generatorForm.prefix}
-                    onChange={(e) => setGeneratorForm({ ...generatorForm, prefix: e.target.value })}
-                    className="w-full bg-[#111620] border border-border rounded-lg px-3 py-1.5 text-xs text-foreground focus:outline-none focus:border-primary"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-slate-300 block mb-1">Hậu tố (Suffix)</label>
-                  <input
-                    type="text"
-                    placeholder="vd: shop, pro"
-                    value={generatorForm.suffix}
-                    onChange={(e) => setGeneratorForm({ ...generatorForm, suffix: e.target.value })}
-                    className="w-full bg-[#111620] border border-border rounded-lg px-3 py-1.5 text-xs text-foreground focus:outline-none focus:border-primary"
-                  />
-                </div>
-              </div>
+                  <div>
+                    <label className="text-xs font-medium text-slate-300 block mb-1">
+                      Tài khoản Gmail thật của bạn <span className="text-rose-400">*</span>
+                    </label>
+                    <input
+                      type="email"
+                      required
+                      placeholder="vd: conghau20@gmail.com"
+                      value={generatorForm.baseGmail}
+                      onChange={(e) => setGeneratorForm({ ...generatorForm, baseGmail: e.target.value })}
+                      className="w-full bg-[#111620] border border-border rounded-lg px-3 py-1.5 text-xs text-foreground font-mono focus:outline-none focus:border-emerald-500"
+                    />
+                    <p className="text-[10px] text-muted-foreground mt-1">
+                      Hộp thư Gmail này sẽ nhận toàn bộ mã OTP 6 số xác thực từ TikTok.
+                    </p>
+                  </div>
 
-              {generatorForm.formatType === "USERNAME_DOMAIN" && (
-                <div>
-                  <label className="text-xs font-medium text-slate-300 block mb-1">Tên gốc (Base Username)</label>
-                  <input
-                    type="text"
-                    value={generatorForm.baseUsername}
-                    onChange={(e) => setGeneratorForm({ ...generatorForm, baseUsername: e.target.value })}
-                    className="w-full bg-[#111620] border border-border rounded-lg px-3 py-1.5 text-xs text-foreground focus:outline-none focus:border-primary"
-                  />
+                  <div>
+                    <label className="text-xs font-medium text-slate-300 block mb-1">
+                      Số lượng email biến thể muốn tạo: <span className="text-emerald-400 font-bold font-mono">{generatorForm.quantity}</span>
+                    </label>
+                    <input
+                      type="range"
+                      min={1}
+                      max={100}
+                      value={generatorForm.quantity}
+                      onChange={(e) => setGeneratorForm({ ...generatorForm, quantity: parseInt(e.target.value) || 10 })}
+                      className="w-full accent-emerald-500 cursor-pointer"
+                    />
+                    <div className="flex justify-between text-[10px] text-muted-foreground">
+                      <span>5 email</span>
+                      <span>50 email</span>
+                      <span>100 email</span>
+                    </div>
+                  </div>
                 </div>
+              ) : (
+                <>
+                  <div>
+                    <label className="text-xs font-medium text-slate-300 block mb-1">Chọn tên miền (Domain)</label>
+                    <select
+                      value={generatorForm.domain}
+                      onChange={(e) => setGeneratorForm({ ...generatorForm, domain: e.target.value })}
+                      className="w-full bg-[#111620] border border-border rounded-lg px-3 py-1.5 text-xs text-foreground focus:outline-none focus:border-primary font-mono"
+                    >
+                      {hosts.map((h) => (
+                        <option key={h.id} value={h.domain}>
+                          {h.domain} ({h.name})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs font-medium text-slate-300 block mb-1">Tiền tố (Prefix)</label>
+                      <input
+                        type="text"
+                        placeholder="vd: tt, creator"
+                        value={generatorForm.prefix}
+                        onChange={(e) => setGeneratorForm({ ...generatorForm, prefix: e.target.value })}
+                        className="w-full bg-[#111620] border border-border rounded-lg px-3 py-1.5 text-xs text-foreground focus:outline-none focus:border-primary"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-slate-300 block mb-1">Hậu tố (Suffix)</label>
+                      <input
+                        type="text"
+                        placeholder="vd: shop, pro"
+                        value={generatorForm.suffix}
+                        onChange={(e) => setGeneratorForm({ ...generatorForm, suffix: e.target.value })}
+                        className="w-full bg-[#111620] border border-border rounded-lg px-3 py-1.5 text-xs text-foreground focus:outline-none focus:border-primary"
+                      />
+                    </div>
+                  </div>
+
+                  {generatorForm.formatType === "USERNAME_DOMAIN" && (
+                    <div>
+                      <label className="text-xs font-medium text-slate-300 block mb-1">Tên gốc (Base Username)</label>
+                      <input
+                        type="text"
+                        value={generatorForm.baseUsername}
+                        onChange={(e) => setGeneratorForm({ ...generatorForm, baseUsername: e.target.value })}
+                        className="w-full bg-[#111620] border border-border rounded-lg px-3 py-1.5 text-xs text-foreground focus:outline-none focus:border-primary"
+                      />
+                    </div>
+                  )}
+
+                  {generatorForm.formatType === "CUSTOM" && (
+                    <div>
+                      <label className="text-xs font-medium text-slate-300 block mb-1">Mẫu cấu trúc tùy biến</label>
+                      <input
+                        type="text"
+                        value={generatorForm.customPattern}
+                        onChange={(e) => setGeneratorForm({ ...generatorForm, customPattern: e.target.value })}
+                        className="w-full bg-[#111620] border border-border rounded-lg px-3 py-1.5 text-xs text-foreground font-mono focus:outline-none focus:border-primary"
+                      />
+                      <p className="text-[10px] text-muted-foreground mt-1">
+                        Thẻ hỗ trợ: {"{prefix}"}, {"{random}"}, {"{num}"}, {"{domain}"}
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs font-medium text-slate-300 block mb-1">Độ dài username ngẫu nhiên</label>
+                      <input
+                        type="number"
+                        min={4}
+                        max={20}
+                        value={generatorForm.length}
+                        onChange={(e) => setGeneratorForm({ ...generatorForm, length: parseInt(e.target.value) || 8 })}
+                        className="w-full bg-[#111620] border border-border rounded-lg px-3 py-1.5 text-xs text-foreground focus:outline-none focus:border-primary"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-slate-300 block mb-1">Số lượng cần tạo</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={500}
+                        value={generatorForm.quantity}
+                        onChange={(e) => setGeneratorForm({ ...generatorForm, quantity: parseInt(e.target.value) || 10 })}
+                        className="w-full bg-[#111620] border border-border rounded-lg px-3 py-1.5 text-xs text-foreground focus:outline-none focus:border-primary"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-medium text-slate-300 block mb-1">Ký tự cho phép</label>
+                    <select
+                      value={generatorForm.allowedChars}
+                      onChange={(e) => setGeneratorForm({ ...generatorForm, allowedChars: e.target.value })}
+                      className="w-full bg-[#111620] border border-border rounded-lg px-3 py-1.5 text-xs text-foreground focus:outline-none focus:border-primary"
+                    >
+                      <option value="alphanumeric">Chữ cái và số (a-z, 0-9)</option>
+                      <option value="letters_only">Chỉ chữ cái (a-z)</option>
+                      <option value="numeric_only">Chỉ số (0-9)</option>
+                    </select>
+                  </div>
+                </>
               )}
-
-              {generatorForm.formatType === "CUSTOM" && (
-                <div>
-                  <label className="text-xs font-medium text-slate-300 block mb-1">Mẫu cấu trúc tùy biến</label>
-                  <input
-                    type="text"
-                    value={generatorForm.customPattern}
-                    onChange={(e) => setGeneratorForm({ ...generatorForm, customPattern: e.target.value })}
-                    className="w-full bg-[#111620] border border-border rounded-lg px-3 py-1.5 text-xs text-foreground font-mono focus:outline-none focus:border-primary"
-                  />
-                  <p className="text-[10px] text-muted-foreground mt-1">
-                    Thẻ hỗ trợ: {"{prefix}"}, {"{random}"}, {"{num}"}, {"{domain}"}
-                  </p>
-                </div>
-              )}
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-medium text-slate-300 block mb-1">Độ dài username ngẫu nhiên</label>
-                  <input
-                    type="number"
-                    min={4}
-                    max={20}
-                    value={generatorForm.length}
-                    onChange={(e) => setGeneratorForm({ ...generatorForm, length: parseInt(e.target.value) || 8 })}
-                    className="w-full bg-[#111620] border border-border rounded-lg px-3 py-1.5 text-xs text-foreground focus:outline-none focus:border-primary"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-slate-300 block mb-1">Số lượng cần tạo</label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={500}
-                    value={generatorForm.quantity}
-                    onChange={(e) => setGeneratorForm({ ...generatorForm, quantity: parseInt(e.target.value) || 10 })}
-                    className="w-full bg-[#111620] border border-border rounded-lg px-3 py-1.5 text-xs text-foreground focus:outline-none focus:border-primary"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="text-xs font-medium text-slate-300 block mb-1">Ký tự cho phép</label>
-                <select
-                  value={generatorForm.allowedChars}
-                  onChange={(e) => setGeneratorForm({ ...generatorForm, allowedChars: e.target.value })}
-                  className="w-full bg-[#111620] border border-border rounded-lg px-3 py-1.5 text-xs text-foreground focus:outline-none focus:border-primary"
-                >
-                  <option value="alphanumeric">Chữ cái và số (a-z, 0-9)</option>
-                  <option value="letters_only">Chỉ chữ cái (a-z)</option>
-                  <option value="numeric_only">Chỉ số (0-9)</option>
-                </select>
-              </div>
 
               <button
                 onClick={handleGenerateEmails}
-                disabled={generating || !generatorForm.domain}
-                className="w-full py-2.5 rounded-lg bg-primary hover:bg-primary-hover text-white text-xs font-semibold transition-all shadow-md shadow-primary/20 flex items-center justify-center gap-1.5 disabled:opacity-50 mt-2"
+                disabled={
+                  generating ||
+                  (generatorForm.formatType === "GMAIL_DOT_TRICK"
+                    ? !generatorForm.baseGmail
+                    : !generatorForm.domain)
+                }
+                className="w-full py-2.5 rounded-lg bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-semibold transition-all shadow-md shadow-emerald-600/20 flex items-center justify-center gap-1.5 disabled:opacity-50 mt-2"
               >
                 <Sparkles className={`w-4 h-4 ${generating ? "animate-spin" : ""}`} />
                 <span>{generating ? "Đang sinh email & kiểm tra trùng..." : "Tạo danh sách & Kiểm tra trùng"}</span>
@@ -596,13 +694,30 @@ export default function HostMailPage() {
                 </div>
 
                 {generatedResults && (
-                  <button
-                    onClick={handleExportGeneratedCsv}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium transition-all shadow"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    <span>Xuất CSV</span>
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={handleCopyAllEmails}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#111620] hover:bg-[#1C2536] border border-border text-slate-200 text-xs font-medium transition-all shadow"
+                      title="Sao chép toàn bộ email hợp lệ"
+                    >
+                      <Copy className="w-3.5 h-3.5 text-primary" />
+                      <span>Sao chép tất cả</span>
+                    </button>
+                    <button
+                      onClick={handleExportGeneratedCsv}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#111620] hover:bg-[#1C2536] border border-border text-emerald-400 text-xs font-medium transition-all shadow"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Xuất CSV</span>
+                    </button>
+                    <button
+                      onClick={handleSendToAutoReg}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-semibold transition-all shadow-md shadow-indigo-600/20"
+                    >
+                      <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                      <span>Đăng ký TikTok ngay</span>
+                    </button>
+                  </div>
                 )}
               </div>
 

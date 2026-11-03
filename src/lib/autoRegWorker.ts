@@ -90,9 +90,16 @@ export async function executeAutoRegisterTikTokAccount(
     const pages = await browser.pages();
     const page = pages.length > 0 ? pages[0] : await browser.newPage();
 
+    // Stealth evasion
+    await page.evaluateOnNewDocument(() => {
+      Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+    });
+
     await page.setUserAgent(
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
     );
+
+    await page.bringToFront().catch(() => {});
 
     // 1. Navigate to direct email registration
     await onLog("Truy cập trang đăng ký TikTok (chế độ Email)...", "INFO");
@@ -184,14 +191,11 @@ export async function executeAutoRegisterTikTokAccount(
     // Setup network response listener for send_code API
     let sendCodeSuccess = false;
     const onResponse = async (res: any) => {
-      if (res.url().includes("send_code") && res.status() === 200) {
-        try {
-          const text = await res.text();
-          if (text.includes("email_ticket") || text.includes("success")) {
-            sendCodeSuccess = true;
-          }
-        } catch {}
-      }
+      try {
+        if (res.url().includes("send_code") && res.status() === 200) {
+          sendCodeSuccess = true;
+        }
+      } catch {}
     };
     page.on("response", onResponse);
 
@@ -212,68 +216,78 @@ export async function executeAutoRegisterTikTokAccount(
     let codeSent = false;
     let captchaPrompted = false;
 
-    for (let wait = 0; wait < 35; wait++) {
-      await new Promise((r) => setTimeout(r, 1500));
+    for (let wait = 0; wait < 30; wait++) {
+      await new Promise((r) => setTimeout(r, 1200));
 
       const status = await page.evaluate(() => {
-        const btn = document.querySelector('button[data-e2e="send-code-button"]') as HTMLButtonElement;
-        const btnText = btn ? (btn.innerText || btn.textContent || "") : "";
-        const isCountdown = btnText.includes("Resend") || btnText.includes("Gửi lại") || /\d+s/.test(btnText);
+        const texts = Array.from(document.querySelectorAll("button, span, div, p")).map((e) => e.textContent || "");
+        const isCountdown = texts.some((t) => t.includes("Resend code") || t.includes("Resend") || t.includes("Gửi lại") || /\b\d{1,2}s\b/.test(t));
         const hasCaptcha = !!document.querySelector(
-          "#captcha-verify-image, .captcha-disable-scroll, #secsdk-captcha-drag-wrapper, .captcha_verify_container"
+          "#captcha-verify-image, .captcha-disable-scroll, #secsdk-captcha-drag-wrapper, .captcha_verify_container, iframe[src*='captcha'], iframe[src*='secsdk']"
         );
-        return { isCountdown, hasCaptcha, btnText };
+        return { isCountdown, hasCaptcha };
       });
 
       if (sendCodeSuccess || status.isCountdown) {
         codeSent = true;
-        await onLog("✅ TikTok đã chấp nhận gửi mã OTP! (Đang gửi về hộp thư)", "SUCCESS");
+        await onLog("✅ TikTok đã xác nhận gửi mã OTP! (Đang gửi về hộp thư Gmail)", "SUCCESS");
         break;
       }
 
       if (status.hasCaptcha && !captchaPrompted) {
         captchaPrompted = true;
+        await page.bringToFront().catch(() => {});
         await onLog(
-          "👉 [HÀNH ĐỘNG CẦN THIẾT]: TikTok hiện bảng ghép hình (Captcha) trên cửa sổ Chrome, vui lòng lấy chuột kéo mảnh ghép vào đúng vị trí!",
+          "👉 [HÀNH ĐỘNG CẦN THIẾT]: TikTok hiện bảng ghép hình (Captcha) trên cửa sổ trình duyệt, bạn hãy lấy chuột kéo mảnh ghép vào đúng vị trí!",
           "WARN"
         );
       }
     }
 
-    if (!codeSent && !captchaPrompted) {
-      await onLog("Tiếp tục kiểm tra mã OTP trong hộp thư...", "INFO");
-    }
+    // Bring browser to front so user sees it clearly
+    await page.bringToFront().catch(() => {});
 
-    // 7. Auto-fetch OTP from Email Center OR detect user entry in Chrome
-    await onLog(`Hệ thống đang tự động theo dõi hộp thư đến của ${email} để bắt mã OTP 6 số...`, "INFO");
-    await onLog(`💡 Bạn cũng có thể mở hộp thư và gõ trực tiếp 6 số OTP vào ô trên màn hình Chrome nếu nhận được mã.`, "INFO");
+    await onLog(
+      `👉 [MỞ GMAIL XEM MÃ]: Mã OTP đã gửi về hộp thư của ${email}. Hãy mở Gmail, lấy mã 6 số và gõ trực tiếp vào ô trên cửa sổ Chrome!`,
+      "WARN"
+    );
 
     let finalOtp: string | null = null;
-    const maxWaitSec = 75;
+    const maxWaitSec = 120; // 2 minutes
     const startPoll = Date.now();
 
     // Start background OTP polling via fetchOtpFromEmail
     const otpPromise = fetchOtpFromEmail(email, maxWaitSec);
 
+    let lastLogReminder = Date.now();
+
     while ((Date.now() - startPoll) < maxWaitSec * 1000) {
-      // A. Check if 6 digits are already typed in the Chrome input
+      // A. Check if 6 digits are already typed in ANY input field on the page
       const userEnteredCode = await page.evaluate(() => {
-        const input = document.querySelector(
-          'input[placeholder*="6-digit code"], input[placeholder*="Enter 6-digit code"], input[placeholder*="mã"], input[type="text"]:not([placeholder*="Email"])'
-        ) as HTMLInputElement;
-        if (input && input.value && input.value.trim().length === 6 && /^\d{6}$/.test(input.value.trim())) {
-          return input.value.trim();
+        const inputs = Array.from(document.querySelectorAll("input"));
+        for (const input of inputs) {
+          const val = input.value?.trim() || "";
+          if (/^\d{6}$/.test(val) && input.getAttribute("type") !== "password") {
+            return val;
+          }
         }
         return null;
       });
 
       if (userEnteredCode) {
         finalOtp = userEnteredCode;
-        await onLog(`Phát hiện mã OTP [${finalOtp}] đã được điền vào ô!`, "SUCCESS");
+        await onLog(`🎯 Phát hiện mã OTP [${finalOtp}] đã được điền vào ô! Đang xác nhận...`, "SUCCESS");
         break;
       }
 
-      // B. Check if background email fetch completed
+      // Log reminder every 25 seconds
+      if (Date.now() - lastLogReminder > 25000) {
+        const remaining = Math.max(0, Math.round((maxWaitSec * 1000 - (Date.now() - startPoll)) / 1000));
+        await onLog(`⏳ [Còn ${remaining}s]: Đang chờ mã OTP... Hãy mở Gmail xem mã và gõ vào ô trên cửa sổ Chrome.`, "INFO");
+        lastLogReminder = Date.now();
+      }
+
+      // B. Check if background email fetch completed (e.g. via IMAP)
       const bgOtp = await Promise.race([
         otpPromise,
         new Promise<null>((r) => setTimeout(() => r(null), 1500)),
@@ -294,7 +308,7 @@ export async function executeAutoRegisterTikTokAccount(
     }
 
     if (!finalOtp) {
-      await onLog(`Chưa nhận được mã OTP trong thời gian chờ cho ${email}. Vui lòng kiểm tra lại Host Mail.`, "ERROR");
+      await onLog(`Hết thời gian chờ (120s) nhận mã OTP cho ${email}.`, "ERROR");
       return { success: false, email, errorMessage: "OTP timeout" };
     }
 

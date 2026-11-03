@@ -89,10 +89,16 @@ export function parseTikTokCookies(raw: string): any[] {
 }
 
 export function getBrowserExecutable(): string | null {
+  const userProfile = process.env.USERPROFILE || "C:\\Users\\Lucas";
   const candidates = [
     "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+    "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+    `${userProfile}\\AppData\\Local\\Google\\Chrome\\Application\\chrome.exe`,
     "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
     "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
+    `${userProfile}\\AppData\\Local\\Microsoft\\Edge\\Application\\msedge.exe`,
+    `${userProfile}\\AppData\\Local\\CocCoc\\Browser\\Application\\browser.exe`,
+    "C:\\Program Files\\CocCoc\\Browser\\Application\\browser.exe",
   ];
 
   for (const path of candidates) {

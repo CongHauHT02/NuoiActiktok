@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, Suspense } from "react";
+import React, { useState, useEffect, useMemo, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   Users2,
@@ -29,6 +29,7 @@ import Papa from "papaparse";
 import { AccountStatusBadge } from "@/components/ui/Badge";
 import { Modal } from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
+import { generateGmailDotVariations } from "@/lib/gmailDotTrick";
 
 function TikTokAccountsContent() {
   const { success, error: toastError, info } = useToast();
@@ -82,12 +83,19 @@ function TikTokAccountsContent() {
 
   // Auto-Reg State
   const [isAutoRegModalOpen, setIsAutoRegModalOpen] = useState(false);
-  const [autoRegMode, setAutoRegMode] = useState<"free_cloud" | "domain" | "paste">("free_cloud");
+  const [autoRegMode, setAutoRegMode] = useState<"gmail_dot" | "free_cloud" | "domain" | "paste">("gmail_dot");
+  const [autoRegGmail, setAutoRegGmail] = useState("conghau20@gmail.com");
+  const [autoRegGmailAppPass, setAutoRegGmailAppPass] = useState("");
   const [autoRegDomain, setAutoRegDomain] = useState("creatorhost.net");
   const [autoRegEmails, setAutoRegEmails] = useState("");
-  const [autoRegCount, setAutoRegCount] = useState(1);
+  const [autoRegCount, setAutoRegCount] = useState(5);
   const [autoRegDelay, setAutoRegDelay] = useState(10);
   const [autoRegStarting, setAutoRegStarting] = useState(false);
+
+  const previewVariations = useMemo(() => {
+    if (autoRegMode !== "gmail_dot" || !autoRegGmail || !autoRegGmail.includes("@")) return [];
+    return generateGmailDotVariations(autoRegGmail, autoRegCount);
+  }, [autoRegMode, autoRegGmail, autoRegCount]);
 
   const fetchAccounts = async (page = 1) => {
     try {
@@ -123,7 +131,22 @@ function TikTokAccountsContent() {
     const action = searchParams.get("action");
     if (action === "new") handleOpenAdd();
     if (action === "import") setIsImportModalOpen(true);
-    if (action === "autoreg") setIsAutoRegModalOpen(true);
+    if (action === "autoreg") {
+      setIsAutoRegModalOpen(true);
+      const mode = searchParams.get("mode") as any;
+      if (mode && ["gmail_dot", "free_cloud", "domain", "paste"].includes(mode)) {
+        setAutoRegMode(mode);
+      }
+      const baseGmailParam = searchParams.get("baseGmail");
+      if (baseGmailParam) setAutoRegGmail(baseGmailParam);
+      const countParam = searchParams.get("count");
+      if (countParam) setAutoRegCount(parseInt(countParam) || 5);
+      const savedEmails = localStorage.getItem("autoreg_prefilled_emails");
+      if (savedEmails) {
+        setAutoRegEmails(savedEmails);
+        localStorage.removeItem("autoreg_prefilled_emails");
+      }
+    }
     const filterStatus = searchParams.get("status");
     if (filterStatus) setStatusFilter(filterStatus);
   }, [searchParams]);
@@ -376,7 +399,16 @@ function TikTokAccountsContent() {
         count: autoRegCount,
         delaySeconds: autoRegDelay,
       };
-      if (autoRegMode === "domain") {
+      if (autoRegMode === "gmail_dot") {
+        if (!autoRegGmail || !autoRegGmail.includes("@")) {
+          toastError("Vui lòng nhập địa chỉ Gmail thật hợp lệ");
+          return;
+        }
+        payload.baseGmail = autoRegGmail;
+        if (autoRegGmailAppPass.trim()) {
+          payload.gmailAppPassword = autoRegGmailAppPass.trim();
+        }
+      } else if (autoRegMode === "domain") {
         payload.domain = autoRegDomain;
       } else if (autoRegMode === "paste") {
         const list = autoRegEmails.split("\n").map((l) => l.trim()).filter((l) => l.includes("@"));
@@ -1272,6 +1304,18 @@ viet_shop_hn | Mai Linh Shop | mailinh@vietmedia.io | Pass789!`}
           <div className="flex rounded-lg bg-[#111620] p-1 border border-border">
             <button
               type="button"
+              onClick={() => setAutoRegMode("gmail_dot")}
+              className={`flex-1 py-1.5 text-xs font-semibold rounded-md transition-all flex items-center justify-center gap-1.5 ${
+                autoRegMode === "gmail_dot"
+                  ? "bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+              <span>Mẹo 0đ: Gmail Dot Trick</span>
+            </button>
+            <button
+              type="button"
               onClick={() => setAutoRegMode("free_cloud")}
               className={`flex-1 py-1.5 text-xs font-semibold rounded-md transition-all flex items-center justify-center gap-1.5 ${
                 autoRegMode === "free_cloud"
@@ -1279,8 +1323,7 @@ viet_shop_hn | Mai Linh Shop | mailinh@vietmedia.io | Pass789!`}
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
-              <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-              <span>Mail Miễn Phí (TikTok Chấp Nhận)</span>
+              <span>Cloud Mail Miễn Phí</span>
             </button>
             <button
               type="button"
@@ -1291,7 +1334,7 @@ viet_shop_hn | Mai Linh Shop | mailinh@vietmedia.io | Pass789!`}
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
-              Host Mail / Domain Riêng
+              Host Mail Riêng
             </button>
             <button
               type="button"
@@ -1306,7 +1349,88 @@ viet_shop_hn | Mai Linh Shop | mailinh@vietmedia.io | Pass789!`}
             </button>
           </div>
 
-          {autoRegMode === "free_cloud" ? (
+          {autoRegMode === "gmail_dot" ? (
+            <div className="space-y-3 p-3.5 rounded-xl bg-gradient-to-br from-emerald-500/10 via-teal-500/10 to-indigo-500/10 border border-emerald-500/30">
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                <span className="text-xs font-bold text-emerald-300">
+                  Mẹo &quot;0 Đồng&quot; Kinh Điển: 1 Gmail tạo hàng loạt Nick TikTok
+                </span>
+                <span className="ml-auto text-[10px] px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 font-semibold">
+                  100% Miễn Phí • Không Cần SIM
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-300 leading-relaxed">
+                Google coi dấu chấm là <strong>vô hình</strong> (tất cả thư đều về chung 1 hộp thư của bạn). Nhưng TikTok coi mỗi dấu chấm là một <strong>tài khoản hoàn toàn mới</strong>! Đuôi <code className="bg-emerald-950 px-1 py-0.5 rounded text-emerald-200">@gmail.com</code> có độ uy tín số 1 thế giới nên thuật toán TikTok <strong>bỏ qua bắt số điện thoại</strong>!
+              </p>
+
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-1">
+                  Địa chỉ Gmail thật của bạn <span className="text-rose-400">*</span>
+                </label>
+                <input
+                  type="email"
+                  required
+                  placeholder="vd: conghau20@gmail.com"
+                  value={autoRegGmail}
+                  onChange={(e) => setAutoRegGmail(e.target.value)}
+                  className="w-full bg-[#111620] border border-border rounded-lg px-3 py-2 text-xs text-foreground font-mono focus:outline-none focus:border-emerald-500"
+                />
+                <p className="text-[10px] text-muted-foreground mt-1">
+                  Tất cả mã OTP xác thực từ TikTok sẽ được gửi thẳng về hộp thư Gmail thật này của bạn.
+                </p>
+              </div>
+
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-1">
+                  Số lượng nick TikTok muốn tạo: <span className="font-bold text-emerald-400 font-mono">{autoRegCount} nick</span>
+                </label>
+                <input
+                  type="range"
+                  min="1"
+                  max="20"
+                  value={autoRegCount}
+                  onChange={(e) => setAutoRegCount(parseInt(e.target.value) || 1)}
+                  className="w-full accent-emerald-500 cursor-pointer"
+                />
+                <div className="flex justify-between text-[10px] text-muted-foreground mt-0.5">
+                  <span>1 nick</span>
+                  <span>10 nick</span>
+                  <span>20 nick</span>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-1 flex items-center justify-between">
+                  <span>Mật khẩu ứng dụng Gmail (Tùy chọn - Đọc OTP tự động qua IMAP)</span>
+                  <span className="text-[10px] text-muted-foreground">Không bắt buộc</span>
+                </label>
+                <input
+                  type="password"
+                  placeholder="vd: abcd efgh ijkl mnop (để trống nếu muốn xem OTP trên máy)"
+                  value={autoRegGmailAppPass}
+                  onChange={(e) => setAutoRegGmailAppPass(e.target.value)}
+                  className="w-full bg-[#111620] border border-border rounded-lg px-3 py-2 text-xs text-foreground font-mono focus:outline-none focus:border-emerald-500"
+                />
+                <p className="text-[10px] text-muted-foreground mt-1">
+                  💡 Nhập Mật khẩu ứng dụng (App Password) để hệ thống tự đọc OTP qua IMAP, hoặc để trống để xem mã trên Gmail rồi gõ trực tiếp vào cửa sổ Chrome.
+                </p>
+              </div>
+
+              {previewVariations.length > 0 && (
+                <div className="p-2.5 rounded-lg bg-[#111620] border border-border text-[11px] space-y-1.5">
+                  <span className="font-semibold text-slate-300 block">Danh sách biến thể Email sẽ dùng:</span>
+                  <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
+                    {previewVariations.map((v, idx) => (
+                      <span key={idx} className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-mono text-[10px]">
+                        {v}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : autoRegMode === "free_cloud" ? (
             <div className="space-y-3 p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
               <div className="flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />

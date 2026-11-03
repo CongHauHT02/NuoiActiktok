@@ -4,6 +4,8 @@ import { TaskQueue } from "@/lib/taskQueue";
 import { logActivity } from "@/lib/logger";
 import { executeAutoRegisterTikTokAccount, generateRandomUsername } from "@/lib/autoRegWorker";
 import { MailTmService } from "@/lib/mailTmService";
+import { generateGmailDotVariations, normalizeGmail } from "@/lib/gmailDotTrick";
+import { fetchGmailOtpViaImap } from "@/lib/imapService";
 
 export const dynamic = "force-dynamic";
 
@@ -11,17 +13,49 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
     const {
-      mode = "free_cloud", // "free_cloud" | "domain" | "paste"
+      mode = "free_cloud", // "free_cloud" | "gmail_dot" | "domain" | "paste"
       emails = [],          // array of email strings
       domain,              // custom domain
+      baseGmail = "",       // Base Gmail for Dot Trick
+      gmailAppPassword = "", // Optional IMAP App Password
       count = 1,
       delaySeconds = 10,
     } = body;
 
-    const requestedCount = Math.min(Math.max(1, parseInt(count) || 1), 20);
-    let targetTasks: Array<{ email?: string; isFreeCloud: boolean }> = [];
+    const requestedCount = Math.min(Math.max(1, parseInt(count) || 1), 30);
+    let targetTasks: Array<{ email?: string; isFreeCloud: boolean; isGmailDot?: boolean }> = [];
 
-    if (mode === "free_cloud") {
+    if (mode === "gmail_dot") {
+      const cleanBase = baseGmail.trim().toLowerCase();
+      if (!cleanBase || !cleanBase.includes("@")) {
+        return NextResponse.json(
+          { error: "Vui lòng nhập địa chỉ Gmail thật của bạn (vd: conghau20@gmail.com)" },
+          { status: 400 }
+        );
+      }
+
+      // Generate up to 200 variations
+      const variations = generateGmailDotVariations(cleanBase, 200);
+
+      // Check existing accounts in database to exclude already used variations
+      const existingAccounts = await prisma.tikTokAccount.findMany({
+        where: { email: { in: variations } },
+        select: { email: true },
+      });
+      const existingSet = new Set(existingAccounts.map((a) => a.email?.toLowerCase()));
+
+      const availableVariations = variations.filter((v) => !existingSet.has(v.toLowerCase()));
+
+      if (availableVariations.length === 0) {
+        return NextResponse.json(
+          { error: "Tất cả các biến thể Gmail Dot Trick của tài khoản này đã được sử dụng trong hệ thống!" },
+          { status: 400 }
+        );
+      }
+
+      const selected = availableVariations.slice(0, requestedCount);
+      targetTasks = selected.map((e) => ({ email: e, isFreeCloud: false, isGmailDot: true }));
+    } else if (mode === "free_cloud") {
       for (let i = 0; i < requestedCount; i++) {
         targetTasks.push({ isFreeCloud: true });
       }
@@ -44,20 +78,36 @@ export async function POST(req: Request) {
     }
 
     const totalSteps = targetTasks.length;
-    const task = await TaskQueue.startTask(
-      `Đăng ký ${totalSteps} tài khoản TikTok thật (Auto-Reg Bán tự động)`,
-      "TIKTOK_ACCOUNT_REGISTRATION",
-      totalSteps
-    );
+    const taskTitle =
+      mode === "gmail_dot"
+        ? `Đăng ký ${totalSteps} nick TikTok qua Mẹo 0đ (Gmail Dot Trick: ${baseGmail})`
+        : `Đăng ký ${totalSteps} tài khoản TikTok thật (Auto-Reg Bán tự động)`;
+
+    const task = await TaskQueue.startTask(taskTitle, "TIKTOK_ACCOUNT_REGISTRATION", totalSteps);
 
     // Run execution in background
     (async () => {
       try {
+        const modeDesc =
+          mode === "gmail_dot"
+            ? `Mẹo 0đ Gmail Dot Trick (${baseGmail})`
+            : mode === "free_cloud"
+            ? "Cloud Mail Miễn Phí"
+            : "Email tùy chọn";
+
         await TaskQueue.log(
           task.id,
-          `Khởi động quy trình Auto-Reg (${mode === "free_cloud" ? "Cloud Mail Miễn Phí" : "Email tùy chọn"}) cho ${totalSteps} tài khoản. Giãn cách: ${delaySeconds}s...`,
+          `Khởi động quy trình Auto-Reg (${modeDesc}) cho ${totalSteps} tài khoản. Giãn cách: ${delaySeconds}s...`,
           "INFO"
         );
+
+        if (mode === "gmail_dot") {
+          await TaskQueue.log(
+            task.id,
+            `💡 [Mẹo 0đ]: Tất cả ${totalSteps} email đăng ký sẽ nhận mã OTP chung về hộp thư Gmail [${baseGmail}]. Đuôi @gmail.com uy tín giúp TikTok bỏ qua bắt số điện thoại!`,
+            "SUCCESS"
+          );
+        }
 
         let successCount = 0;
 
@@ -105,8 +155,33 @@ export async function POST(req: Request) {
           );
 
           // Function to poll OTP
-          const fetchOtp = async (targetEmail: string, timeoutSec = 60): Promise<string | null> => {
-            // A. If Mail.tm account, poll via Mail.tm API
+          const fetchOtp = async (targetEmail: string, timeoutSec = 120): Promise<string | null> => {
+            // In Gmail Dot mode without app password, remind user immediately
+            if (currentTask.isGmailDot && !gmailAppPassword) {
+              await TaskQueue.log(
+                task.id,
+                `👉 [HÃY MỞ GMAIL]: Mã xác minh OTP 6 số đã được TikTok gửi về [${baseGmail}]. Bạn hãy mở tab Gmail, copy/nhớ mã 6 số và gõ ngay vào ô trên cửa sổ Chrome!`,
+                "WARN"
+              );
+            }
+
+            // A. If Gmail Dot Trick with App Password, connect IMAP directly
+            if (currentTask.isGmailDot && gmailAppPassword) {
+              try {
+                return await fetchGmailOtpViaImap(
+                  baseGmail,
+                  gmailAppPassword,
+                  timeoutSec,
+                  async (msg) => {
+                    await TaskQueue.log(task.id, msg, "INFO");
+                  }
+                );
+              } catch (err: any) {
+                await TaskQueue.log(task.id, `Lỗi kiểm tra IMAP Gmail: ${err.message}`, "WARN");
+              }
+            }
+
+            // B. If Mail.tm account, poll via Mail.tm API
             if (mailTmAccount) {
               return await MailTmService.waitForTikTokOtp(
                 mailTmAccount.token,
@@ -117,7 +192,7 @@ export async function POST(req: Request) {
               );
             }
 
-            // B. If custom Host Mail, poll from database
+            // C. If custom Host Mail or manual, poll from database
             const pollInterval = 3000;
             const maxAttempts = Math.ceil((timeoutSec * 1000) / pollInterval);
 
@@ -138,6 +213,7 @@ export async function POST(req: Request) {
                 if (match) return match[1];
               }
             }
+
             return null;
           };
 
@@ -185,7 +261,7 @@ export async function POST(req: Request) {
           action: "AUTO_REG_CAMPAIGN",
           resourceType: "TikTokAccount",
           resourceId: task.id,
-          details: `Hoàn tất đăng ký ${successCount}/${totalSteps} tài khoản TikTok thật`,
+          details: `Hoàn tất đăng ký ${successCount}/${totalSteps} tài khoản TikTok thật (${modeDesc})`,
         });
       } catch (err: any) {
         console.error("AutoReg execution error:", err);
@@ -195,7 +271,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       success: true,
-      message: `Đã kích hoạt tiến trình tạo tự động ${totalSteps} tài khoản TikTok!`,
+      message: `Đã kích hoạt tiến trình tạo tự động ${totalSteps} tài khoản TikTok (${modeTitle(mode)})!`,
       taskId: task.id,
       totalAccounts: totalSteps,
     });
@@ -204,3 +280,15 @@ export async function POST(req: Request) {
   }
 }
 
+function modeTitle(mode: string): string {
+  switch (mode) {
+    case "gmail_dot":
+      return "Mẹo 0đ Gmail Dot Trick";
+    case "free_cloud":
+      return "Cloud Mail Miễn Phí";
+    case "domain":
+      return "Host Mail Riêng";
+    default:
+      return "Email Sẵn Có";
+  }
+}
