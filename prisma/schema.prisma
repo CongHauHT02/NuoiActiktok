@@ -1,0 +1,260 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id               String        @id @default(cuid())
+  email            String        @unique
+  name             String
+  password         String
+  role             String        @default("ADMIN") // SUPER_ADMIN, ADMIN, MANAGER, MEMBER
+  status           String        @default("ACTIVE") // ACTIVE, INACTIVE, SUSPENDED
+  avatar           String?
+  twoFactorEnabled Boolean       @default(false)
+  lastLoginAt      DateTime?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  activityLogs     ActivityLog[]
+  tasks            Task[]
+}
+
+model MailHost {
+  id                String         @id @default(cuid())
+  name              String
+  domain            String
+  serverAddress     String
+  protocol          String         @default("IMAP") // IMAP, POP3, SMTP, REST_API
+  port              Int            @default(993)
+  username          String
+  passwordEncrypted String
+  apiKeyEncrypted   String?
+  status            String         @default("CONNECTED") // CONNECTED, DISCONNECTED, ERROR, CHECKING
+  storageUsedMb     Float          @default(120)
+  storageLimitMb    Float          @default(5000)
+  lastCheckedAt     DateTime?
+  errorMessage      String?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  emailAccounts     EmailAccount[]
+  emailMessages     EmailMessage[]
+}
+
+model EmailAccount {
+  id                String         @id @default(cuid())
+  email             String         @unique
+  mailHostId        String
+  passwordEncrypted String?
+  status            String         @default("ACTIVE") // ACTIVE, INACTIVE, FULL, ERROR
+  unreadCount       Int            @default(0)
+  totalCount        Int            @default(0)
+  lastSyncAt        DateTime?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  mailHost          MailHost       @relation(fields: [mailHostId], references: [id], onDelete: Cascade)
+  tiktokAccounts    TikTokAccount[]
+  messages          EmailMessage[]
+}
+
+model EmailMessage {
+  id               String        @id @default(cuid())
+  mailHostId       String
+  emailAccountId   String?
+  sender           String
+  recipient        String
+  subject          String
+  bodyText         String
+  bodyHtml         String?
+  category         String        @default("GENERAL") // VERIFICATION_CODE, SECURITY_ALERT, NOTIFICATION, GENERAL
+  verificationCode String?
+  isRead           Boolean       @default(false)
+  receivedAt       DateTime      @default(now())
+  createdAt        DateTime      @default(now())
+
+  mailHost         MailHost      @relation(fields: [mailHostId], references: [id], onDelete: Cascade)
+  emailAccount     EmailAccount? @relation(fields: [emailAccountId], references: [id], onDelete: SetNull)
+}
+
+model AccountGroup {
+  id          String          @id @default(cuid())
+  name        String          @unique
+  description String?
+  color       String          @default("#4F8CFF")
+  isDefault   Boolean         @default(false)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  accounts    TikTokAccount[]
+}
+
+model AccountTag {
+  id        String          @id @default(cuid())
+  name      String          @unique
+  color     String          @default("#22C55E")
+  createdAt DateTime        @default(now())
+
+  accounts  TikTokAccount[]
+}
+
+model TikTokAccount {
+  id                String          @id @default(cuid())
+  username          String          @unique
+  displayName       String
+  email             String?
+  emailAccountId    String?
+  passwordEncrypted String?
+  sessionCookies    String?
+  tiktokUid         String?
+  birthDate         String?
+  avatarUrl         String?
+  bio               String?
+  country           String          @default("VN")
+  language          String          @default("vi")
+  status            String          @default("NEW") // ACTIVE, NEW, CONFIGURED, NEED_CHECK, ERROR, SUSPENDED
+  groupId           String?
+  notes             String?
+  followersCount    Int             @default(0)
+  followingCount    Int             @default(0)
+  likesCount        Int             @default(0)
+  videosCount       Int             @default(0)
+  lastActiveAt      DateTime?
+  lastSyncAt        DateTime?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  group             AccountGroup?   @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  emailAccountRef   EmailAccount?   @relation(fields: [emailAccountId], references: [id], onDelete: SetNull)
+  profile           AccountProfile?
+  tags              AccountTag[]
+}
+
+model AccountProfile {
+  id                String          @id @default(cuid())
+  tiktokAccountId   String          @unique
+  setupStatus       String          @default("PENDING") // PENDING, IN_PROGRESS, COMPLETED, FAILED
+  targetUsername    String?
+  targetDisplayName String?
+  targetBio         String?
+  targetAvatarUrl   String?
+  targetCountry     String?
+  targetLanguage    String?
+  templateId        String?
+  completedAt       DateTime?
+  notes             String?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  tiktokAccount     TikTokAccount   @relation(fields: [tiktokAccountId], references: [id], onDelete: Cascade)
+  template          ProfileTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+}
+
+model ProfileTemplate {
+  id          String           @id @default(cuid())
+  name        String
+  category    String           @default("Creator") // Creator, Affiliate, Business, Gaming, Fashion
+  bioSample   String
+  country     String           @default("VN")
+  language    String           @default("vi")
+  avatarUrl   String?
+  createdAt   DateTime         @default(now())
+
+  profiles    AccountProfile[]
+}
+
+model Workflow {
+  id              String         @id @default(cuid())
+  name            String
+  description     String?
+  type            String         @default("SYNC_ACCOUNTS") // SYNC_ACCOUNTS, CHECK_MAIL_HEALTH, SYNC_EMAILS, AUDIT_REMINDER, EXPORT_REPORT, OFFICIAL_API_SYNC
+  cronExpression  String?        @default("0 */6 * * *")
+  isEnabled       Boolean        @default(true)
+  rateLimitPerMin Int            @default(60)
+  retryCount      Int            @default(3)
+  timeoutSeconds  Int            @default(300)
+  totalRuns       Int            @default(0)
+  lastRunAt       DateTime?
+  lastRunStatus   String?        @default("SUCCESS") // SUCCESS, FAILED, RUNNING
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  runs            WorkflowRun[]
+}
+
+model WorkflowRun {
+  id             String    @id @default(cuid())
+  workflowId     String
+  status         String    @default("RUNNING") // RUNNING, SUCCESS, FAILED, CANCELLED
+  triggeredBy    String    @default("SCHEDULE") // MANUAL, SCHEDULE, WEBHOOK
+  logs           String?
+  itemsProcessed Int       @default(0)
+  itemsFailed    Int       @default(0)
+  startedAt      DateTime  @default(now())
+  endedAt        DateTime?
+  durationMs     Int?
+
+  workflow       Workflow  @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+}
+
+model Task {
+  id                   String     @id @default(cuid())
+  taskName             String
+  type                 String     @default("BATCH_STATUS_UPDATE") // IMPORT_ACCOUNTS, EXPORT_DATA, BATCH_STATUS_UPDATE, EMAIL_SYNC, HEALTH_CHECK, WORKFLOW_JOB
+  totalItems           Int        @default(0)
+  processedItems       Int        @default(0)
+  progressPercent      Float      @default(0)
+  status               String     @default("PENDING") // PENDING, RUNNING, COMPLETED, FAILED, PAUSED, CANCELLED
+  errorDetail          String?
+  startedAt            DateTime?
+  completedAt          DateTime?
+  totalDurationSeconds Float?
+  userId               String?
+  createdAt            DateTime   @default(now())
+  updatedAt            DateTime   @updatedAt
+
+  user                 User?      @relation(fields: [userId], references: [id], onDelete: SetNull)
+  logs                 TaskLog[]
+}
+
+model TaskLog {
+  id        String   @id @default(cuid())
+  taskId    String
+  level     String   @default("INFO") // INFO, WARN, ERROR, SUCCESS
+  message   String
+  timestamp DateTime @default(now())
+
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+}
+
+model ActivityLog {
+  id           String   @id @default(cuid())
+  userId       String?
+  userName     String?
+  action       String
+  resourceType String
+  resourceId   String?
+  details      String?
+  ipAddress    String?  @default("127.0.0.1")
+  status       String   @default("SUCCESS") // SUCCESS, WARNING, ERROR
+  createdAt    DateTime @default(now())
+
+  user         User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+}
+
+model SystemSetting {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  value       String
+  description String?
+  updatedAt   DateTime @updatedAt
+}
+
