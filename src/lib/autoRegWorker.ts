@@ -95,23 +95,7 @@ export async function executeAutoRegisterTikTokAccount(
     const pages = await browser.pages();
     const page = pages.length > 0 ? pages[0] : await browser.newPage();
 
-    // Advanced Stealth evasion for ByteDance MSSDK
-    await page.evaluateOnNewDocument(() => {
-      const newProto = Object.getPrototypeOf(navigator);
-      delete (newProto as any).webdriver;
-      Object.defineProperty(navigator, "plugins", { get: () => [1, 2, 3, 4, 5] });
-      Object.defineProperty(navigator, "languages", { get: () => ["vi-VN", "vi", "en-US", "en"] });
-      (window as any).chrome = {
-        runtime: {},
-        loadTimes: function () {},
-        csi: function () {},
-        app: {},
-      };
-    });
-
-    await page.setUserAgent(
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
-    );
+    // Native untampered Chrome session (ByteDance MSSDK friendly)
 
     await page.bringToFront().catch(() => {});
 
@@ -180,13 +164,11 @@ export async function executeAutoRegisterTikTokAccount(
       await page.keyboard.type(password, { delay: 35 });
     }
 
-    // Blur / Click outside to trigger React validation on password
+    // Blur / Click outside cleanly
     try {
-      const selectHeader = await page.$('div[data-e2e="select-container"]');
-      if (selectHeader) await selectHeader.click();
+      await page.click('body');
     } catch {}
-
-    await new Promise((r) => setTimeout(r, 1000));
+    await new Promise((r) => setTimeout(r, 1500));
 
     // 5. Check if email is already registered on TikTok
     await new Promise((r) => setTimeout(r, 1200));
