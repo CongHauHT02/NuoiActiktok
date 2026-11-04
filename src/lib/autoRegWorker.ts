@@ -79,20 +79,34 @@ export async function executeAutoRegisterTikTokAccount(
       executablePath,
       headless: false, // Visible so user can drag puzzle piece if TikTok requires it
       defaultViewport: null,
+      ignoreDefaultArgs: ["--enable-automation"],
       args: [
         "--no-sandbox",
         "--disable-setuid-sandbox",
-        "--disable-blink-features=AutomationControlled",
+        "--disable-infobars",
+        "--window-position=50,50",
         "--window-size=1280,850",
+        "--disable-blink-features=AutomationControlled",
+        "--no-first-run",
+        "--no-default-browser-check",
       ],
     });
 
     const pages = await browser.pages();
     const page = pages.length > 0 ? pages[0] : await browser.newPage();
 
-    // Stealth evasion
+    // Advanced Stealth evasion for ByteDance MSSDK
     await page.evaluateOnNewDocument(() => {
-      Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+      const newProto = Object.getPrototypeOf(navigator);
+      delete (newProto as any).webdriver;
+      Object.defineProperty(navigator, "plugins", { get: () => [1, 2, 3, 4, 5] });
+      Object.defineProperty(navigator, "languages", { get: () => ["vi-VN", "vi", "en-US", "en"] });
+      (window as any).chrome = {
+        runtime: {},
+        loadTimes: function () {},
+        csi: function () {},
+        app: {},
+      };
     });
 
     await page.setUserAgent(
@@ -213,7 +227,16 @@ export async function executeAutoRegisterTikTokAccount(
     await onLog("Nhấn nút 'Send code' (Gửi mã xác minh về email)...", "INFO");
     const sendCodeBtn = await page.$('button[data-e2e="send-code-button"]');
     if (sendCodeBtn) {
-      await sendCodeBtn.click();
+      const box = await sendCodeBtn.boundingBox();
+      if (box) {
+        await page.mouse.move(box.x + box.width / 2 + (Math.random() * 8 - 4), box.y + box.height / 2 + (Math.random() * 4 - 2), { steps: 18 });
+        await new Promise((r) => setTimeout(r, 200));
+        await page.mouse.down();
+        await new Promise((r) => setTimeout(r, 80));
+        await page.mouse.up();
+      } else {
+        await sendCodeBtn.click();
+      }
     } else {
       await page.evaluate(() => {
         const btns = Array.from(document.querySelectorAll("button"));
