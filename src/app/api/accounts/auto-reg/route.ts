@@ -9,6 +9,9 @@ import { fetchGmailOtpViaImap } from "@/lib/imapService";
 
 export const dynamic = "force-dynamic";
 
+// Global in-memory cache to prevent re-trying the exact same dot variation within 15 minutes
+const recentlyAttemptedDotEmails = new Map<string, number>();
+
 export async function POST(req: Request) {
   try {
     const body = await req.json();
@@ -37,6 +40,14 @@ export async function POST(req: Request) {
       // Generate up to 200 variations
       const variations = generateGmailDotVariations(cleanBase, 200);
 
+            // Clean up old attempts (> 15 minutes)
+      const now = Date.now();
+      recentlyAttemptedDotEmails.forEach((time, em) => {
+        if (now - time > 15 * 60 * 1000) {
+          recentlyAttemptedDotEmails.delete(em);
+        }
+      });
+
       // Check existing accounts in database to exclude already used variations
       const existingAccounts = await prisma.tikTokAccount.findMany({
         where: { email: { in: variations } },
@@ -44,7 +55,15 @@ export async function POST(req: Request) {
       });
       const existingSet = new Set(existingAccounts.map((a) => a.email?.toLowerCase()));
 
-      const availableVariations = variations.filter((v) => !existingSet.has(v.toLowerCase()));
+      // Prioritize variations that are NOT in DB AND NOT recently attempted (so retries try next dot positions!)
+      let availableVariations = variations.filter(
+        (v) => !existingSet.has(v.toLowerCase()) && !recentlyAttemptedDotEmails.has(v.toLowerCase())
+      );
+
+      // If all variations were recently attempted, fallback to any unused in database
+      if (availableVariations.length === 0) {
+        availableVariations = variations.filter((v) => !existingSet.has(v.toLowerCase()));
+      }
 
       if (availableVariations.length === 0) {
         return NextResponse.json(
@@ -54,6 +73,10 @@ export async function POST(req: Request) {
       }
 
       const selected = availableVariations.slice(0, requestedCount);
+      // Mark as recently attempted so subsequent clicks rotate to next variations
+      for (const sel of selected) {
+        recentlyAttemptedDotEmails.set(sel.toLowerCase(), Date.now());
+      }
       targetTasks = selected.map((e) => ({ email: e, isFreeCloud: false, isGmailDot: true }));
     } else if (mode === "free_cloud") {
       for (let i = 0; i < requestedCount; i++) {
