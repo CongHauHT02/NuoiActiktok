@@ -552,8 +552,11 @@ export async function executeAutoRegisterTikTokAccount(
         return null;
       });
 
-      if (pageError && pageError.toLowerCase().includes("code") && check > 5) {
-        await onLog(`⚠️ TikTok thông báo lỗi mã xác thực: "${pageError}"`, "WARN");
+      if (pageError && (pageError.toLowerCase().includes("code") || pageError.toLowerCase().includes("maximum") || pageError.toLowerCase().includes("attempts") || pageError.toLowerCase().includes("try again")) && check > 3) {
+        await onLog(`⚠️ TikTok thông báo: "${pageError}"`, "WARN");
+        if (pageError.toLowerCase().includes("maximum") || pageError.toLowerCase().includes("attempts")) {
+          await onLog(`👉 [LÝ DO & GIẢI PHÁP]: Mã OTP hoặc Email này đã bị TikTok khóa tạm thời do thử quá số lần cho phép. Hãy đổi sang 1 địa chỉ Gmail khác hoặc chọn chế độ "Cloud Mail 0đ (Mail.tm)" để nhận mã OTP mới tinh!`, "WARN");
+        }
         break;
       }
     }
