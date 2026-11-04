@@ -504,60 +504,67 @@ export async function executeAutoRegisterTikTokAccount(
     for (let check = 0; check < 35; check++) {
       await new Promise((r) => setTimeout(r, 1500));
 
-      // A. Check if Captcha dialog appeared
-      const hasCaptcha = await page.evaluate(() => {
-        const el = document.querySelector(
-          '#captcha-verify-image, #secsdk-captcha-drag-wrapper, .captcha_verify_container, iframe[src*="captcha"], iframe[src*="secsdk"], div[class*="captcha"], div[class*="secsdk"], .captcha-disable-scroll'
-        );
-        const hasBodyLock = document.body.classList.contains("captcha-disable-scroll") || document.documentElement.classList.contains("captcha-disable-scroll");
-        return !!el || hasBodyLock;
-      });
+      try {
+        // A. Check if Captcha dialog appeared
+        const hasCaptcha = await page.evaluate(() => {
+          const el = document.querySelector(
+            '#captcha-verify-image, #secsdk-captcha-drag-wrapper, .captcha_verify_container, iframe[src*="captcha"], iframe[src*="secsdk"], div[class*="captcha"], div[class*="secsdk"], .captcha-disable-scroll'
+          );
+          const hasBodyLock = document.body.classList.contains("captcha-disable-scroll") || document.documentElement.classList.contains("captcha-disable-scroll");
+          return !!el || hasBodyLock;
+        });
 
-      if (hasCaptcha) {
-        bringChromeToForeground();
-        if (!captchaPromptedAfterNext) {
-          captchaPromptedAfterNext = true;
-          await onLog("🧩 [HÀNH ĐỘNG CỦA BẠN]: TikTok đang hiện Bảng ghép hình Captcha! Cửa sổ Chrome đã được đưa lên trên cùng màn hình, hãy lấy chuột kéo mảnh ghép vào vị trí!", "WARN");
-        }
-      }
-
-      // B. Check if username setup step appears
-      const usernameInput = await page.$('input[placeholder*="Username"], input[placeholder*="tên người dùng"]');
-      if (usernameInput) {
-        await onLog(`Thiết lập Username cho tài khoản: @${finalUsername}...`, "INFO");
-        await usernameInput.click();
-        await page.keyboard.type(finalUsername, { delay: 40 });
-        await new Promise((r) => setTimeout(r, 600));
-
-        const finishBtn = await page.$('button[type="submit"]');
-        if (finishBtn) await finishBtn.click();
-      }
-
-      // C. Check if sessionid cookie is present
-      const allCookies = await page.cookies();
-      sessionCookie = allCookies.find((c) => c.name === "sessionid" || c.name === "sessionid_ss" || c.name === "sid_tt");
-      if (sessionCookie) {
-        break;
-      }
-
-      // D. Check for visible rejection error (e.g., "Incorrect code", "Code expired")
-      const pageError = await page.evaluate(() => {
-        const errorNodes = Array.from(document.querySelectorAll('[role="alert"], [class*="error"], [class*="Error"], span[style*="red"], div[class*="tip"]'));
-        for (const n of errorNodes) {
-          const text = n.textContent?.trim();
-          if (text && text.length > 3 && text.length < 80 && !text.includes("birthday") && !text.includes("Characters") && !text.includes("Letters")) {
-            return text;
+        if (hasCaptcha) {
+          bringChromeToForeground();
+          if (!captchaPromptedAfterNext) {
+            captchaPromptedAfterNext = true;
+            await onLog("🧩 [HÀNH ĐỘNG CỦA BẠN]: TikTok đang hiện Bảng ghép hình Captcha! Cửa sổ Chrome đã được đưa lên trên cùng màn hình, hãy lấy chuột kéo mảnh ghép vào vị trí!", "WARN");
           }
         }
-        return null;
-      });
 
-      if (pageError && (pageError.toLowerCase().includes("code") || pageError.toLowerCase().includes("maximum") || pageError.toLowerCase().includes("attempts") || pageError.toLowerCase().includes("try again")) && check > 3) {
-        await onLog(`⚠️ TikTok thông báo: "${pageError}"`, "WARN");
-        if (pageError.toLowerCase().includes("maximum") || pageError.toLowerCase().includes("attempts")) {
-          await onLog(`👉 [LÝ DO & GIẢI PHÁP]: Mã OTP hoặc Email này đã bị TikTok khóa tạm thời do thử quá số lần cho phép. Hãy đổi sang 1 địa chỉ Gmail khác hoặc chọn chế độ "Cloud Mail 0đ (Mail.tm)" để nhận mã OTP mới tinh!`, "WARN");
+        // B. Check if username setup step appears
+        const usernameInput = await page.$('input[placeholder*="Username"], input[placeholder*="tên người dùng"]');
+        if (usernameInput) {
+          await onLog(`Thiết lập Username cho tài khoản: @${finalUsername}...`, "INFO");
+          await usernameInput.click();
+          await page.keyboard.type(finalUsername, { delay: 40 });
+          await new Promise((r) => setTimeout(r, 600));
+
+          const finishBtn = await page.$('button[type="submit"]');
+          if (finishBtn) await finishBtn.click();
         }
-        break;
+
+        // C. Check if sessionid cookie is present
+        const allCookies = await page.cookies();
+        sessionCookie = allCookies.find((c) => c.name === "sessionid" || c.name === "sessionid_ss" || c.name === "sid_tt");
+        if (sessionCookie) {
+          break;
+        }
+
+        // D. Check for visible rejection error (e.g., "Incorrect code", "Code expired", "Maximum number of attempts")
+        const pageError = await page.evaluate(() => {
+          const errorNodes = Array.from(document.querySelectorAll('[role="alert"], [class*="error"], [class*="Error"], span[style*="red"], div[class*="tip"]'));
+          for (const n of errorNodes) {
+            const text = n.textContent?.trim();
+            if (text && text.length > 3 && text.length < 80 && !text.includes("birthday") && !text.includes("Characters") && !text.includes("Letters")) {
+              return text;
+            }
+          }
+          return null;
+        });
+
+        if (pageError && (pageError.toLowerCase().includes("code") || pageError.toLowerCase().includes("maximum") || pageError.toLowerCase().includes("attempts") || pageError.toLowerCase().includes("try again")) && check > 2) {
+          await onLog(`⚠️ TikTok thông báo: "${pageError}"`, "WARN");
+          if (pageError.toLowerCase().includes("maximum") || pageError.toLowerCase().includes("attempts")) {
+            await onLog(`👉 [LÝ DO & GIẢI PHÁP RATE LIMIT]: Địa chỉ IP mạng đang dùng bị TikTok giới hạn do gửi quá nhiều lần trong 1 giờ (error_code 7). Hãy phát 4G từ điện thoại (bật tắt chế độ máy bay 5s để đổi IP mới sạch 100%) là đăng ký thành công ngay lập tức!`, "WARN");
+          }
+          break;
+        }
+      } catch (loopErr: any) {
+        if (loopErr.message?.includes("Target closed") || loopErr.message?.includes("detached Frame") || loopErr.message?.includes("Session closed")) {
+          await onLog("Trình duyệt đã được đóng hoặc chuyển trang.", "INFO");
+          break;
+        }
       }
     }
 
