@@ -1,7 +1,17 @@
 import fs from "fs";
+import path from "path";
+import { exec } from "child_process";
 import { getBrowserExecutable } from "./browserWorker";
 import prisma from "./prisma";
 import { encrypt } from "./crypto";
+
+function bringChromeToForeground() {
+  try {
+    exec('powershell -Command "(New-Object -ComObject WScript.Shell).AppActivate(\'TikTok\')"');
+    exec('powershell -Command "(New-Object -ComObject WScript.Shell).AppActivate(\'Chrome\')"');
+    exec('powershell -Command "(New-Object -ComObject WScript.Shell).AppActivate(\'Google Chrome\')"');
+  } catch {}
+}
 
 export interface AutoRegParams {
   email: string;
@@ -74,7 +84,7 @@ export async function executeAutoRegisterTikTokAccount(
   try {
     await onLog(`Mở cửa sổ Chrome trực quan để bắt đầu đăng ký cho: ${email}...`, "INFO");
 
-    // Launch visible browser (headed mode) with real window size
+    // Launch visible browser (headed mode) with maximized window
     browser = await puppeteer.launch({
       executablePath,
       headless: false, // Visible so user can drag puzzle piece if TikTok requires it
@@ -84,13 +94,16 @@ export async function executeAutoRegisterTikTokAccount(
         "--no-sandbox",
         "--disable-setuid-sandbox",
         "--disable-infobars",
-        "--window-position=50,50",
-        "--window-size=1280,850",
+        "--start-maximized",
+        "--new-window",
         "--disable-blink-features=AutomationControlled",
         "--no-first-run",
         "--no-default-browser-check",
       ],
     });
+
+    // Forcibly bring Chrome to foreground on Windows desktop
+    bringChromeToForeground();
 
     const pages = await browser.pages();
     const page = pages.length > 0 ? pages[0] : await browser.newPage();
@@ -98,6 +111,7 @@ export async function executeAutoRegisterTikTokAccount(
     // Native untampered Chrome session (ByteDance MSSDK friendly)
 
     await page.bringToFront().catch(() => {});
+    bringChromeToForeground();
 
     // 1. Navigate to direct email registration
     await onLog("Truy cập trang đăng ký TikTok (chế độ Email)...", "INFO");
@@ -106,6 +120,7 @@ export async function executeAutoRegisterTikTokAccount(
       timeout: 35000,
     });
 
+    bringChromeToForeground();
     await new Promise((r) => setTimeout(r, 2500));
 
     // 2. Fill Birthday
@@ -461,6 +476,7 @@ export async function executeAutoRegisterTikTokAccount(
     const nextBtn = await page.$('button[type="submit"]');
     if (nextBtn) {
       await onLog("Nhấn nút Tiếp tục (Next) để gửi mã xác thực tới TikTok...", "INFO");
+      bringChromeToForeground();
       const box = await nextBtn.boundingBox();
       if (box) {
         await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 12 });
@@ -474,6 +490,8 @@ export async function executeAutoRegisterTikTokAccount(
     } else {
       await page.keyboard.press("Enter");
     }
+
+    bringChromeToForeground();
 
     // 9. Wait for account creation, Captcha, & optional Username prompt
     let sessionCookie: any = null;
@@ -489,15 +507,18 @@ export async function executeAutoRegisterTikTokAccount(
       // A. Check if Captcha dialog appeared
       const hasCaptcha = await page.evaluate(() => {
         const el = document.querySelector(
-          '#captcha-verify-image, #secsdk-captcha-drag-wrapper, .captcha_verify_container, iframe[src*="captcha"], iframe[src*="secsdk"], div[class*="captcha-"]'
+          '#captcha-verify-image, #secsdk-captcha-drag-wrapper, .captcha_verify_container, iframe[src*="captcha"], iframe[src*="secsdk"], div[class*="captcha"], div[class*="secsdk"], .captcha-disable-scroll'
         );
-        return !!el;
+        const hasBodyLock = document.body.classList.contains("captcha-disable-scroll") || document.documentElement.classList.contains("captcha-disable-scroll");
+        return !!el || hasBodyLock;
       });
 
-      if (hasCaptcha && !captchaPromptedAfterNext) {
-        captchaPromptedAfterNext = true;
-        await page.bringToFront().catch(() => {});
-        await onLog("🧩 [HÀNH ĐỘNG CỦA BẠN]: TikTok đang hiện Bảng ghép hình Captcha! Hãy lấy chuột kéo mảnh ghép vào vị trí trên cửa sổ Chrome!", "WARN");
+      if (hasCaptcha) {
+        bringChromeToForeground();
+        if (!captchaPromptedAfterNext) {
+          captchaPromptedAfterNext = true;
+          await onLog("🧩 [HÀNH ĐỘNG CỦA BẠN]: TikTok đang hiện Bảng ghép hình Captcha! Cửa sổ Chrome đã được đưa lên trên cùng màn hình, hãy lấy chuột kéo mảnh ghép vào vị trí!", "WARN");
+        }
       }
 
       // B. Check if username setup step appears
@@ -542,6 +563,12 @@ export async function executeAutoRegisterTikTokAccount(
     const cookies = await page.cookies();
 
     if (!sessionCookie) {
+      try {
+        const publicDir = path.join(process.cwd(), "public");
+        if (!fs.existsSync(publicDir)) fs.mkdirSync(publicDir, { recursive: true });
+        await page.screenshot({ path: path.join(publicDir, "autoreg_last_state.png") });
+      } catch {}
+
       const pageError = await page.evaluate(() => {
         const errorNodes = Array.from(document.querySelectorAll('[role="alert"], [class*="error"], [class*="Error"], span[style*="red"], div[class*="tip"]'));
         return errorNodes.map(n => n.textContent?.trim()).filter(Boolean)[0] || null;
