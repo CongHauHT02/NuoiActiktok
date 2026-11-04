@@ -318,56 +318,65 @@ export async function executeAutoRegisterTikTokAccount(
         };
       }
 
+      // Check countdown button & captcha
       const status = await page.evaluate(() => {
-        const texts = Array.from(document.querySelectorAll("button, span, div, p")).map((e) => e.textContent || "");
-        const isCountdown = texts.some((t) => t.includes("Resend code") || t.includes("Resend") || t.includes("Gửi lại") || /\b\d{1,2}s\b/.test(t));
+        const sendBtn = document.querySelector('button[data-e2e="send-code-button"]');
+        const sendBtnText = sendBtn?.textContent?.trim() || "";
+        const isCountdown = /resend|\b\d{1,2}s\b|gửi lại/i.test(sendBtnText);
+
         const hasCaptcha = !!document.querySelector(
           "#captcha-verify-image, .captcha-disable-scroll, #secsdk-captcha-drag-wrapper, .captcha_verify_container, iframe[src*='captcha'], iframe[src*='secsdk']"
         );
-        const errorText = texts.find((t) =>
-          t.includes("Too many attempts") ||
-          t.includes("Maximum number of attempts") ||
-          t.includes("quá nhiều lần") ||
-          t.includes("try again later")
+
+        // Only inspect visible short leaf elements for genuine rate limits
+        let visibleError: string | null = null;
+        const candidates = Array.from(
+          document.querySelectorAll('[role="alert"], [class*="error"], [class*="Error"], [class*="toast"], [class*="Toast"], [class*="tooltip"], [class*="Tooltip"]')
         );
-        return { isCountdown, hasCaptcha, errorText };
+        for (const cand of candidates) {
+          const el = cand as HTMLElement;
+          const isVisible = el.offsetWidth > 0 && el.offsetHeight > 0;
+          const text = el.textContent?.trim() || "";
+          if (isVisible && text.length > 5 && text.length < 120) {
+            if (/too many attempts|maximum number of attempts|quá nhiều lần/i.test(text)) {
+              visibleError = text;
+              break;
+            }
+          }
+        }
+
+        return { isCountdown, hasCaptcha, visibleError, sendBtnText };
       });
 
-      if (status.errorText) {
-        await onLog(`⚠️ TikTok cảnh báo: "${status.errorText}"`, "WARN");
+      // Priority 1: Network confirmed success OR countdown active -> OTP sent!
+      if (sendCodeSuccess || status.isCountdown) {
+        codeSent = true;
+        await onLog("✅ TikTok đã xác nhận gửi mã OTP! (Đang gửi về hộp thư Gmail)", "SUCCESS");
+        break;
       }
 
+      // Priority 2: Captcha displayed
       if (status.hasCaptcha) {
         if (!captchaPrompted) {
           captchaPrompted = true;
           await page.bringToFront().catch(() => {});
           await onLog(
-            "👉 [HÀNH ĐỘNG CẦN THIẾT]: TikTok hiện bảng ghép hình (Captcha) trên cửa sổ Chrome, bạn hãy lấy chuột kéo mảnh ghép vào đúng vị trí!",
+            "🧩 [HÀNH ĐỘNG CẦN THIẾT]: TikTok hiện bảng ghép hình (Captcha) trên cửa sổ Chrome, bạn hãy lấy chuột kéo mảnh ghép vào đúng vị trí!",
             "WARN"
           );
         }
         continue;
       }
 
-      if (status.errorText) {
-        const isRateLimit = status.errorText.includes("Maximum number of attempts") || status.errorText.includes("Too many attempts") || status.errorText.includes("try again later");
-        if (isRateLimit) {
-          await onLog(`❌ TikTok từ chối gửi mã OTP: "Maximum number of attempts reached. Try again later."`, "ERROR");
-          await onLog(`💡 [HƯỚNG DẪN XỬ LÝ]: Địa chỉ IP của bạn đã bị TikTok tạm khóa do gửi mã quá nhiều lần liên tiếp. Để tiếp tục ngay lập tức:`, "WARN");
-          await onLog(`👉 1. Hãy bật Cloudflare WARP 1.1.1.1 (Miễn phí) hoặc phát Wi-Fi từ 4G điện thoại (bật tắt chế độ máy bay để đổi IP mới sạch).`, "WARN");
-          await onLog(`👉 2. Hoặc đợi 15-30 phút để TikTok tự động mở khóa IP rồi thử lại.`, "WARN");
-          return {
-            success: false,
-            email,
-            errorMessage: "TikTok rate limit: Maximum number of attempts reached. Cần đổi IP hoặc đợi 15 phút.",
-          };
-        }
-      }
-
-      if ((sendCodeSuccess || status.isCountdown) && !status.errorText) {
-        codeSent = true;
-        await onLog("✅ TikTok đã xác nhận gửi mã OTP! (Đang gửi về hộp thư Gmail)", "SUCCESS");
-        break;
+      // Priority 3: Genuine visible rate limit error after waiting at least 4 turns
+      if (status.visibleError && wait > 3) {
+        await onLog(`❌ TikTok từ chối gửi mã OTP: "${status.visibleError}"`, "ERROR");
+        await onLog(`👉 [HƯỚNG DẪN XỬ LÝ]: Địa chỉ IP bị TikTok giới hạn tần suất. Hãy phát 4G từ điện thoại (bật tắt chế độ máy bay) để đổi IP mới sạch.`, "WARN");
+        return {
+          success: false,
+          email,
+          errorMessage: `TikTok rate limit: ${status.visibleError}`,
+        };
       }
 
       if (sendCodeErrorMsg && !captchaPrompted && wait > 5) {
