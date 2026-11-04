@@ -2,17 +2,19 @@
 title TikTok Account Manager - Development Server
 cd /d "%~dp0"
 
-:: Add common nvm and node directories to PATH if present
-if exist "%LOCALAPPDATA%\Programs\nodejs" set "PATH=%LOCALAPPDATA%\Programs\nodejs;%PATH%"
+:: Ensure modern Node v20 is loaded first
+if exist "C:\Users\adminloc\AppData\Roaming\nvm\v20.11.1" set "PATH=C:\Users\adminloc\AppData\Roaming\nvm\v20.11.1;%PATH%"
+if exist "C:\Users\dchau\AppData\Roaming\nvm\v20.11.1" set "PATH=C:\Users\dchau\AppData\Roaming\nvm\v20.11.1;%PATH%"
 if exist "%APPDATA%\nvm\v20.11.1" set "PATH=%APPDATA%\nvm\v20.11.1;%PATH%"
+if exist "%LOCALAPPDATA%\Programs\nodejs" set "PATH=%LOCALAPPDATA%\Programs\nodejs;%PATH%"
 if exist "%APPDATA%\nvm\current" set "PATH=%APPDATA%\nvm\current;%PATH%"
-if exist "%ProgramFiles%\nodejs" set "PATH=%ProgramFiles%\nodejs;%PATH%"
 
 echo ========================================================
 echo   TIKTOK ACCOUNT MANAGER (DEV MODE)
 echo   Dang khoi dong tai: http://localhost:3000
 echo ========================================================
 
+node -v
 where pnpm >nul 2>nul
 if %errorlevel% equ 0 (
   call pnpm dev -p 3000
