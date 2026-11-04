@@ -3,6 +3,7 @@ import prisma from "@/lib/prisma";
 import { TaskQueue } from "@/lib/taskQueue";
 import { logActivity } from "@/lib/logger";
 import { executeAutoRegisterTikTokAccount, generateRandomUsername } from "@/lib/autoRegWorker";
+import { executeAutoRegisterTikTokOnLdPlayer } from "@/lib/ldplayerWorker";
 import { MailTmService } from "@/lib/mailTmService";
 import { generateGmailDotVariations, normalizeGmail } from "@/lib/gmailDotTrick";
 import { fetchGmailOtpViaImap } from "@/lib/imapService";
@@ -15,6 +16,7 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
     const {
+      platform = "ldplayer", // "ldplayer" (recommended) | "chrome"
       mode = "free_cloud", // "free_cloud" | "gmail_dot" | "domain" | "paste"
       emails = [],          // array of email strings
       domain,              // custom domain
@@ -236,13 +238,24 @@ export async function POST(req: Request) {
             return null;
           };
 
-          const result = await executeAutoRegisterTikTokAccount({
-            email: emailToUse,
-            onLog: async (message, level) => {
-              await TaskQueue.log(task.id, message, level);
-            },
-            fetchOtpFromEmail: fetchOtp,
-          });
+          let result;
+          if (platform === "ldplayer") {
+            result = await executeAutoRegisterTikTokOnLdPlayer({
+              email: emailToUse,
+              onLog: async (message, level) => {
+                await TaskQueue.log(task.id, message, level);
+              },
+              fetchOtp: fetchOtp,
+            });
+          } else {
+            result = await executeAutoRegisterTikTokAccount({
+              email: emailToUse,
+              onLog: async (message, level) => {
+                await TaskQueue.log(task.id, message, level);
+              },
+              fetchOtpFromEmail: fetchOtp,
+            });
+          }
 
           if (result.success) {
             successCount++;

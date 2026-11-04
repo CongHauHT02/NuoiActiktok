@@ -22,6 +22,8 @@ import {
   Calendar,
   Layers,
   Sparkles,
+  Smartphone,
+  Globe,
   ArrowRight,
   UserCheck,
 } from "lucide-react";
@@ -83,7 +85,8 @@ function TikTokAccountsContent() {
 
   // Auto-Reg State
   const [isAutoRegModalOpen, setIsAutoRegModalOpen] = useState(false);
-  const [autoRegMode, setAutoRegMode] = useState<"gmail_dot" | "free_cloud" | "domain" | "paste">("gmail_dot");
+  const [autoRegPlatform, setAutoRegPlatform] = useState<"ldplayer" | "chrome">("ldplayer");
+  const [autoRegMode, setAutoRegMode] = useState<"gmail_dot" | "free_cloud" | "domain" | "paste">("free_cloud");
   const [autoRegGmail, setAutoRegGmail] = useState("conghau20@gmail.com");
   const [autoRegGmailAppPass, setAutoRegGmailAppPass] = useState("");
   const [autoRegDomain, setAutoRegDomain] = useState("creatorhost.net");
@@ -395,6 +398,7 @@ function TikTokAccountsContent() {
     try {
       setAutoRegStarting(true);
       const payload: any = {
+        platform: autoRegPlatform,
         mode: autoRegMode,
         count: autoRegCount,
         delaySeconds: autoRegDelay,
@@ -1301,6 +1305,51 @@ viet_shop_hn | Mai Linh Shop | mailinh@vietmedia.io | Pass789!`}
         maxWidth="lg"
       >
         <form onSubmit={handleStartAutoReg} className="space-y-4">
+          {/* Platform Selector */}
+          <div>
+            <label className="text-xs font-medium text-slate-300 block mb-1.5">
+              Thiết bị thực thi Auto-Reg <span className="text-emerald-400">*</span>
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setAutoRegPlatform("ldplayer")}
+                className={`p-2.5 rounded-lg border text-left transition-all flex items-start gap-2.5 ${
+                  autoRegPlatform === "ldplayer"
+                    ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-200"
+                    : "bg-[#111620] border-border text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <Smartphone className="w-4 h-4 text-emerald-400 mt-0.5 shrink-0" />
+                <div>
+                  <div className="text-xs font-semibold flex items-center gap-1.5">
+                    Giả lập LDPlayer 9
+                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-normal">Khuyên dùng</span>
+                  </div>
+                  <div className="text-[10px] text-muted-foreground mt-0.5">
+                    App TikTok Android thật, né bot web
+                  </div>
+                </div>
+              </button>
+              <button
+                type="button"
+                onClick={() => setAutoRegPlatform("chrome")}
+                className={`p-2.5 rounded-lg border text-left transition-all flex items-start gap-2.5 ${
+                  autoRegPlatform === "chrome"
+                    ? "bg-primary/15 border-primary/40 text-primary"
+                    : "bg-[#111620] border-border text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <Globe className="w-4 h-4 text-primary mt-0.5 shrink-0" />
+                <div>
+                  <div className="text-xs font-semibold">Trình duyệt Chrome PC</div>
+                  <div className="text-[10px] text-muted-foreground mt-0.5">
+                    Mở trình duyệt Web trên máy tính
+                  </div>
+                </div>
+              </button>
+            </div>
+          </div>
           <div className="flex rounded-lg bg-[#111620] p-1 border border-border">
             <button
               type="button"

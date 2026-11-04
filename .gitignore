@@ -36,3 +36,5 @@ Thumbs.db
 # Temporary / Scratch
 scratch/
 .attempted_dot_emails.json
+
+*.tsbuildinfo
