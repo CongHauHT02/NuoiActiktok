@@ -188,30 +188,87 @@ export async function executeAutoRegisterTikTokAccount(
 
     await new Promise((r) => setTimeout(r, 1000));
 
-    // 5. Wait for "Send code" button to become active (disabled = false)
-    await onLog("Đang đợi form kiểm tra mật khẩu & kích hoạt nút 'Send code'...", "INFO");
+    // 5. Check if email is already registered on TikTok
+    await new Promise((r) => setTimeout(r, 1200));
+
+    const emailCheckError = await page.evaluate(() => {
+      const texts = Array.from(document.querySelectorAll('[role="alert"], [class*="error"], [class*="Error"], span, p, div'))
+        .map((e) => e.textContent?.trim() || "")
+        .filter((t) => t.length > 0 && t.length < 150);
+
+      const alreadySignedUp = texts.find(
+        (t) =>
+          t.includes("already signed up") ||
+          t.includes("đã được sử dụng") ||
+          t.includes("đã đăng ký") ||
+          t.includes("linked to another account") ||
+          t.includes("Email is linked")
+      );
+      return alreadySignedUp || null;
+    });
+
+    if (emailCheckError) {
+      await onLog(
+        `❌ [EMAIL ĐÃ TỒN TẠI]: TikTok thông báo "${emailCheckError}". Email này đã được đăng ký tài khoản TikTok từ trước rồi!`,
+        "ERROR"
+      );
+      await onLog(
+        `💡 TikTok tự động phát hiện và nhận diện Gmail gốc (kể cả khi dùng Mẹo dấu chấm). Hãy nhập một tài khoản Gmail CHƯA TỪNG đăng ký TikTok để nhận mã OTP!`,
+        "WARN"
+      );
+      return {
+        success: false,
+        email,
+        errorMessage: `Email đã đăng ký TikTok từ trước: ${emailCheckError}`,
+      };
+    }
+
+    // 6. Wait for "Send code" button to become active (disabled = false)
+    await onLog("Đang kiểm tra form mật khẩu & nút 'Send code'...", "INFO");
+    let sendCodeDisabled = false;
     try {
       await page.waitForFunction(
         () => {
           const btn = document.querySelector('button[data-e2e="send-code-button"]') as HTMLButtonElement;
           return btn && !btn.disabled;
         },
-        { timeout: 8000 }
+        { timeout: 5000 }
       );
     } catch {
-      await onLog("Nút 'Send code' chưa sẵn sàng hoặc cần tương tác thêm...", "WARN");
+      sendCodeDisabled = true;
+    }
+
+    if (sendCodeDisabled) {
+      // Re-verify if TikTok threw an inline error under email/password
+      const inlineErrors = await page.evaluate(() => {
+        const errorNodes = Array.from(document.querySelectorAll('[role="alert"], [class*="error"], [class*="Error"], span[style*="red"]'));
+        return errorNodes.map(n => n.textContent?.trim()).filter(Boolean);
+      });
+
+      if (inlineErrors.length > 0) {
+        await onLog(`❌ TikTok phát hiện lỗi trên form đăng ký: "${inlineErrors.join(", ")}"`, "ERROR");
+        return {
+          success: false,
+          email,
+          errorMessage: `Lỗi form đăng ký TikTok: ${inlineErrors.join(", ")}`,
+        };
+      }
     }
 
     // Setup network response listener for send_code API
     let sendCodeSuccess = false;
     let sendCodeErrorMsg = "";
+    let sendCodeAlreadyExists = false;
     const onResponse = async (res: any) => {
       try {
-        if (res.url().includes("send_code")) {
+        if (res.url().includes("send_code") || res.url().includes("check_email")) {
           const json = await res.json().catch(() => null);
           if (json) {
             if (json.message === "success") {
               sendCodeSuccess = true;
+            } else if (json.data?.error_code === 1023 || json.data?.description?.includes("linked to another account")) {
+              sendCodeAlreadyExists = true;
+              sendCodeErrorMsg = json.data?.description || "Email is linked to another account";
             } else if (json.data?.description || json.message) {
               sendCodeErrorMsg = json.data?.description || json.message;
             }
@@ -245,12 +302,21 @@ export async function executeAutoRegisterTikTokAccount(
       });
     }
 
-    // 6. Wait for Captcha or Resend countdown
+    // 7. Wait for Captcha or Resend countdown
     let codeSent = false;
     let captchaPrompted = false;
 
-    for (let wait = 0; wait < 45; wait++) {
+    for (let wait = 0; wait < 35; wait++) {
       await new Promise((r) => setTimeout(r, 1200));
+
+      if (sendCodeAlreadyExists) {
+        await onLog(`❌ [EMAIL ĐÃ TỒN TẠI]: Máy chủ TikTok xác nhận "${sendCodeErrorMsg}". Email này đã có tài khoản TikTok!`, "ERROR");
+        return {
+          success: false,
+          email,
+          errorMessage: "Email đã tồn tại trên TikTok",
+        };
+      }
 
       const status = await page.evaluate(() => {
         const texts = Array.from(document.querySelectorAll("button, span, div, p")).map((e) => e.textContent || "");
