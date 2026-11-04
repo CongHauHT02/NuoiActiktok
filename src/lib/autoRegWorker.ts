@@ -470,32 +470,29 @@ export async function executeAutoRegisterTikTokAccount(
     }
 
     // 11. Extract real session cookies & Verify real login
-    await onLog("Trích xuất và kiểm tra trạng thái đăng ký của tài khoản mới...", "INFO");
+    await onLog("Trích xuất và kiểm tra phiên đăng nhập thật (sessionid) từ TikTok...", "INFO");
     const cookies = await page.cookies();
     const currentUrl = page.url();
     const sessionCookie = cookies.find((c) => c.name === "sessionid" || c.name === "sessionid_ss" || c.name === "sid_tt");
-    const isDownloadApp = currentUrl.includes("download-app");
 
-    if (isDownloadApp) {
-      await onLog("🎉 TikTok đã xác nhận đăng ký tài khoản thành công! (TikTok chuyển tiếp tới màn hình tải App di động). Tài khoản đã kích hoạt hoàn tất!", "SUCCESS");
-    } else if (sessionCookie) {
-      await onLog("🎉 Trích xuất phiên đăng nhập Cookie thành công!", "SUCCESS");
-    } else {
-      // Check if TikTok is still on signup with an inline error
+    if (!sessionCookie) {
+      // Check if TikTok has an error message on screen
       const pageError = await page.evaluate(() => {
-        const errorNodes = Array.from(document.querySelectorAll('[role="alert"], [class*="error"], [class*="Error"], span[style*="red"]'));
+        const errorNodes = Array.from(document.querySelectorAll('[role="alert"], [class*="error"], [class*="Error"], span[style*="red"], div[class*="tip"]'));
         return errorNodes.map(n => n.textContent?.trim()).filter(Boolean)[0] || null;
       });
 
-      if (pageError) {
-        await onLog(`❌ Lỗi hoàn tất TikTok: "${pageError}"`, "ERROR");
-        return {
-          success: false,
-          email,
-          errorMessage: pageError,
-        };
-      }
+      const err = pageError || "Chưa hoàn tất bước đăng nhập (TikTok chưa cấp sessionid).";
+      await onLog(`❌ Đăng ký chưa hoàn tất: ${err}`, "ERROR");
+      await onLog(`💡 Hãy đảm bảo mã OTP nhập vào ô là mã MỚI NHẤT trong Gmail. Bạn cũng có thể gõ trực tiếp mã 6 số vào ô trên cửa sổ Chrome!`, "WARN");
+      return {
+        success: false,
+        email,
+        errorMessage: err,
+      };
     }
+
+    await onLog("🎉 Đăng nhập thành công! Đã trích xuất phiên Cookie sessionid thật từ TikTok!", "SUCCESS");
 
     const cookiesJson = JSON.stringify(cookies);
 
