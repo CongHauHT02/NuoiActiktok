@@ -13,7 +13,7 @@ export async function fetchGmailOtpViaImap(
   onLog?: (msg: string) => Promise<void>
 ): Promise<string | null> {
   const cleanUser = gmailUser.trim().toLowerCase();
-  const cleanPass = appPassword.replace(/\s+/g, ""); // strip any spaces in app password
+  const cleanPass = appPassword.replace(/\s+/g, ""); // strip spaces
   const startTime = Date.now();
   const timeoutMs = timeoutSeconds * 1000;
 
@@ -21,19 +21,11 @@ export async function fetchGmailOtpViaImap(
     await onLog(`[IMAP] Đang kết nối tới imap.gmail.com:993 cho tài khoản ${cleanUser}...`);
   }
 
-  let attemptCount = 0;
-  let lastReminder = Date.now();
-
+  let attempt = 0;
   while (Date.now() - startTime < timeoutMs) {
-    attemptCount++;
+    attempt++;
     try {
-      const code = await checkImapSession(cleanUser, cleanPass, startTime - 60000, async (detail) => {
-        if (onLog && Date.now() - lastReminder > 15000) {
-          lastReminder = Date.now();
-          await onLog(detail);
-        }
-      });
-
+      const code = await checkImapSession(cleanUser, cleanPass, startTime - 120000, onLog);
       if (code) {
         if (onLog) await onLog(`[IMAP] 🎯 Đã tìm thấy mã OTP TikTok: [${code}] từ hộp thư Gmail!`);
         return code;
@@ -42,16 +34,17 @@ export async function fetchGmailOtpViaImap(
       if (onLog) {
         await onLog(`[IMAP] ⚠️ ${err.message}`);
       }
-      // If authentication failed permanently, fail early
       if (err.message.includes("Mật khẩu ứng dụng") || err.message.includes("AUTHENTICATIONFAILED")) {
-        return null;
+        return null; // Don't retry if credentials invalid
       }
     }
 
-    // Wait 3 seconds before next cycle if still within timeout
-    const remaining = Math.max(0, Math.round((timeoutMs - (Date.now() - startTime)) / 1000));
+    const elapsed = Math.round((Date.now() - startTime) / 1000);
+    const remaining = Math.max(0, timeoutSeconds - elapsed);
     if (remaining <= 3) break;
-    await new Promise((r) => setTimeout(r, 3000));
+
+    // Sleep 4 seconds between poll cycles
+    await new Promise((r) => setTimeout(r, 4000));
   }
 
   return null;
@@ -112,7 +105,7 @@ export function decodeMimeBody(rawBody: string): string {
   if (!rawBody) return "";
   let fullDecoded = rawBody;
 
-  // 1. Extract Base64 parts
+  // Extract Base64 parts
   const b64Regex = /Content-Transfer-Encoding:\s*base64[\r\n]+([\s\S]*?)(?:--|\r?\n\r?\n[A-Z]|$)/gi;
   let match;
   while ((match = b64Regex.exec(rawBody)) !== null) {
@@ -125,7 +118,7 @@ export function decodeMimeBody(rawBody: string): string {
     } catch {}
   }
 
-  // 2. Decode Quoted-Printable if present
+  // Decode Quoted-Printable
   if (/Content-Transfer-Encoding:\s*quoted-printable/i.test(rawBody)) {
     try {
       fullDecoded += "\n" + decodeQuotedPrintable(rawBody);
@@ -154,9 +147,8 @@ export function extractTikTokOtpFromRaw(
   const dateMatch = rawHeaders.match(/Date:\s*([^\r\n]+)/i) || rawHeaders.match(/INTERNALDATE\s+"([^"]+)"/i);
   if (dateMatch && minTimestamp) {
     const msgDate = new Date(dateMatch[1]).getTime();
-    // Allow up to 10 minutes clock drift, but reject emails older than 10 mins
     if (!isNaN(msgDate) && msgDate < minTimestamp - 600000) {
-      return null;
+      return null; // Ignore emails older than 10 mins
     }
   }
 
@@ -174,7 +166,7 @@ export function extractTikTokOtpFromRaw(
     return null;
   }
 
-  // 1. Check Subject specifically (Most reliable - TikTok puts code directly in Subject)
+  // 1. Check Subject specifically (TikTok puts code directly in Subject)
   const subjLine = decodedHeaders.match(/Subject:\s*([^\r\n]+)/i)?.[1] || "";
   const subjOtpMatch =
     subjLine.match(/\b(\d{6})\b\s*(?:là mã|is your|mã xác)/i) ||
@@ -198,7 +190,7 @@ export function extractTikTokOtpFromRaw(
     }
   }
 
-  // 3. Fallback: Any standalone 6-digit number not part of CSS hex color (#000000)
+  // 3. Fallback: Any standalone 6-digit number not preceded by #
   const matches = Array.from(decodedBody.matchAll(/(?<![#&a-zA-Z0-9])(\d{6})(?![a-zA-Z0-9])/g))
     .map((m) => m[1])
     .filter(isValidOtp);
@@ -207,25 +199,27 @@ export function extractTikTokOtpFromRaw(
 }
 
 /**
- * Execute a single IMAP polling cycle with robust state machine
+ * Execute IMAP command flow using deterministic tagged response parser
  */
 function checkImapSession(
   user: string,
   pass: string,
   minTimestamp?: number,
-  onProgress?: (msg: string) => Promise<void>
+  onLog?: (msg: string) => Promise<void>
 ): Promise<string | null> {
   return new Promise((resolve, reject) => {
     let resolved = false;
-    const finish = (result: string | null) => {
+
+    const cleanup = (res: string | null) => {
       if (!resolved) {
         resolved = true;
         try {
           socket.destroy();
         } catch {}
-        resolve(result);
+        resolve(res);
       }
     };
+
     const fail = (err: Error) => {
       if (!resolved) {
         resolved = true;
@@ -242,122 +236,129 @@ function checkImapSession(
         port: 993,
         servername: "imap.gmail.com",
         rejectUnauthorized: false, // Essential for Windows corporate/firewall/antivirus SSL proxies
-        timeout: 12000,
+        timeout: 10000,
       },
       () => {
-        let tagCounter = 1;
+        let tagCount = 1;
+        let currentTag = "";
         let buffer = "";
-        let stage: "GREETING" | "LOGIN" | "SELECT" | "SEARCH" | "FETCH" = "GREETING";
+        let step = "WAIT_GREETING";
         let candidateSeqs: string[] = [];
         let fetchIndex = 0;
 
-        const send = (cmd: string) => {
-          const tag = `A${tagCounter++}`;
-          socket.write(`${tag} ${cmd}\r\n`);
-          return tag;
+        const sendCmd = (cmd: string) => {
+          currentTag = `A${tagCount++}`;
+          buffer = "";
+          socket.write(`${currentTag} ${cmd}\r\n`);
+          return currentTag;
         };
 
-        socket.on("data", async (data) => {
-          buffer += data.toString("utf8");
+        socket.on("data", async (chunk) => {
+          buffer += chunk.toString("utf8");
 
-          // 1. Initial Greeting
-          if (stage === "GREETING" && buffer.includes("* OK")) {
-            buffer = "";
-            stage = "LOGIN";
-            send(`LOGIN "${user}" "${pass}"`);
+          // Step 1: Wait for greeting
+          if (step === "WAIT_GREETING") {
+            if (buffer.includes("* OK")) {
+              step = "LOGGING_IN";
+              sendCmd(`LOGIN "${user}" "${pass}"`);
+            }
           }
 
-          // 2. Login Response
-          else if (stage === "LOGIN") {
-            if (buffer.includes("NO") || buffer.includes("BAD")) {
+          // Step 2: Login response
+          else if (step === "LOGGING_IN") {
+            if (buffer.includes(`${currentTag} OK`)) {
+              if (onLog) await onLog(`[IMAP] ✅ Đăng nhập thành công vào Gmail [${user}]!`);
+              step = "SELECTING_INBOX";
+              sendCmd("SELECT INBOX");
+            } else if (buffer.includes(`${currentTag} NO`) || buffer.includes(`${currentTag} BAD`)) {
               fail(
                 new Error(
-                  "Đăng nhập Gmail IMAP thất bại: Vui lòng kiểm tra lại Mật khẩu ứng dụng (16 chữ cái) hoặc Bật IMAP trong Cài đặt Gmail (Settings > Forwarding & POP/IMAP > Enable IMAP)"
+                  "Đăng nhập Gmail thất bại. Vui lòng kiểm tra lại Mật khẩu ứng dụng (16 chữ cái) trong Google Account"
                 )
               );
-              return;
-            }
-            if (buffer.includes("OK")) {
-              buffer = "";
-              stage = "SELECT";
-              send("SELECT INBOX");
             }
           }
 
-          // 3. Select INBOX Response
-          else if (stage === "SELECT") {
-            if (buffer.includes("OK [READ-WRITE]") || buffer.includes("OK [READ-ONLY]") || buffer.includes("OK Success")) {
-              buffer = "";
-              stage = "SEARCH";
-              // RFC standard search: Search unseen or from tiktok
-              send('SEARCH OR UNSEEN FROM "tiktok"');
+          // Step 3: Select INBOX response
+          else if (step === "SELECTING_INBOX") {
+            if (buffer.includes(`${currentTag} OK`)) {
+              // Extract total message count from INBOX
+              const existsMatch = buffer.match(/\* (\d+) EXISTS/);
+              const totalExists = existsMatch ? parseInt(existsMatch[1], 10) : 0;
+              if (onLog) await onLog(`[IMAP] Đã mở INBOX (${totalExists} thư). Đang quét thư từ TikTok...`);
+
+              // Step 4: Search for messages from TikTok
+              step = "SEARCHING";
+              sendCmd('SEARCH FROM "tiktok"');
+            } else if (buffer.includes(`${currentTag} NO`) || buffer.includes(`${currentTag} BAD`)) {
+              fail(new Error("Không thể mở hộp thư INBOX Gmail"));
             }
           }
 
-          // 4. Search Response
-          else if (stage === "SEARCH") {
-            if (buffer.includes("* SEARCH")) {
-              const match = buffer.match(/\* SEARCH ([\d\s]+)/);
-              if (match && match[1].trim()) {
-                candidateSeqs = match[1].trim().split(/\s+/).filter(Boolean);
+          // Step 4: Search response
+          else if (step === "SEARCHING") {
+            if (buffer.includes(`${currentTag} OK`)) {
+              const searchMatch = buffer.match(/\* SEARCH ([\d\s]+)/);
+              if (searchMatch && searchMatch[1].trim()) {
+                candidateSeqs = searchMatch[1].trim().split(/\s+/).filter(Boolean);
               }
 
-              // If OR search returned nothing, fallback to checking newest 3 messages in INBOX
+              // If FROM "tiktok" didn't find any message, try searching ALL
               if (candidateSeqs.length === 0) {
-                // Check if buffer has total EXISTS count
-                const existsMatch = buffer.match(/\* (\d+) EXISTS/);
-                if (existsMatch) {
-                  const total = parseInt(existsMatch[1], 10);
-                  if (total > 0) {
-                    const startSeq = Math.max(1, total - 2);
-                    for (let s = startSeq; s <= total; s++) {
-                      candidateSeqs.push(s.toString());
-                    }
-                  }
-                }
-              }
-
-              if (candidateSeqs.length > 0) {
-                buffer = "";
-                stage = "FETCH";
-                fetchIndex = candidateSeqs.length - 1; // Start from newest message
-                const seq = candidateSeqs[fetchIndex];
-                send(`FETCH ${seq} (INTERNALDATE BODY[HEADER.FIELDS (FROM TO SUBJECT DATE)] BODY[TEXT])`);
-              } else {
-                if (onProgress) {
-                  await onProgress(`[IMAP] Đã kết nối Gmail [${user}]. Đang đợi email mã xác minh từ TikTok...`);
-                }
-                finish(null);
-              }
-            } else if (buffer.includes("BAD") || buffer.includes("NO")) {
-              // If search failed, try SEARCH ALL as fallback
-              buffer = "";
-              send("SEARCH ALL");
-            }
-          }
-
-          // 5. Fetch Message Content Response
-          else if (stage === "FETCH") {
-            if (buffer.includes("OK Fetch completed") || buffer.includes("OK Success") || buffer.includes(")\r\n")) {
-              // Parse headers & body
-              const headers = buffer;
-              const body = buffer;
-              const otp = extractTikTokOtpFromRaw(headers, body, minTimestamp);
-
-              if (otp) {
-                finish(otp);
+                step = "SEARCHING_ALL";
+                sendCmd("SEARCH ALL");
                 return;
               }
 
-              // If not found in this message, try previous candidate if available
+              if (onLog) await onLog(`[IMAP] Tìm thấy ${candidateSeqs.length} thư TikTok trong INBOX. Đang đọc thư mới nhất...`);
+              step = "FETCHING";
+              fetchIndex = candidateSeqs.length - 1;
+              const seq = candidateSeqs[fetchIndex];
+              sendCmd(`FETCH ${seq} (INTERNALDATE BODY[HEADER.FIELDS (FROM TO SUBJECT DATE)] BODY[TEXT])`);
+            } else if (buffer.includes(`${currentTag} NO`) || buffer.includes(`${currentTag} BAD`)) {
+              step = "SEARCHING_ALL";
+              sendCmd("SEARCH ALL");
+            }
+          }
+
+          // Fallback: Search all messages
+          else if (step === "SEARCHING_ALL") {
+            if (buffer.includes(`${currentTag} OK`)) {
+              const searchMatch = buffer.match(/\* SEARCH ([\d\s]+)/);
+              if (searchMatch && searchMatch[1].trim()) {
+                const all = searchMatch[1].trim().split(/\s+/).filter(Boolean);
+                // Take only the last 3 messages (most recent)
+                candidateSeqs = all.slice(-3);
+              }
+
+              if (candidateSeqs.length > 0) {
+                step = "FETCHING";
+                fetchIndex = candidateSeqs.length - 1;
+                const seq = candidateSeqs[fetchIndex];
+                sendCmd(`FETCH ${seq} (INTERNALDATE BODY[HEADER.FIELDS (FROM TO SUBJECT DATE)] BODY[TEXT])`);
+              } else {
+                cleanup(null);
+              }
+            }
+          }
+
+          // Step 5: Fetch response
+          else if (step === "FETCHING") {
+            if (buffer.includes(`${currentTag} OK`)) {
+              const otp = extractTikTokOtpFromRaw(buffer, buffer, minTimestamp);
+              if (otp) {
+                cleanup(otp);
+                return;
+              }
+
+              // If not found in this message, try the previous candidate (up to 3 recent)
               fetchIndex--;
               if (fetchIndex >= 0 && fetchIndex >= candidateSeqs.length - 3) {
-                buffer = "";
-                const nextSeq = candidateSeqs[fetchIndex];
-                send(`FETCH ${nextSeq} (INTERNALDATE BODY[HEADER.FIELDS (FROM TO SUBJECT DATE)] BODY[TEXT])`);
+                const prevSeq = candidateSeqs[fetchIndex];
+                sendCmd(`FETCH ${prevSeq} (INTERNALDATE BODY[HEADER.FIELDS (FROM TO SUBJECT DATE)] BODY[TEXT])`);
               } else {
                 // Done checking candidates for this cycle
-                finish(null);
+                cleanup(null);
               }
             }
           }
@@ -368,11 +369,11 @@ function checkImapSession(
         });
 
         socket.on("timeout", () => {
-          finish(null);
+          cleanup(null);
         });
 
         socket.on("end", () => {
-          finish(null);
+          cleanup(null);
         });
       }
     );

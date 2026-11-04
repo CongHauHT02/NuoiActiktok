@@ -190,10 +190,20 @@ export async function executeAutoRegisterTikTokAccount(
 
     // Setup network response listener for send_code API
     let sendCodeSuccess = false;
+    let sendCodeErrorMsg = "";
     const onResponse = async (res: any) => {
       try {
-        if (res.url().includes("send_code") && res.status() === 200) {
-          sendCodeSuccess = true;
+        if (res.url().includes("send_code")) {
+          const json = await res.json().catch(() => null);
+          if (json) {
+            if (json.message === "success") {
+              sendCodeSuccess = true;
+            } else if (json.data?.description || json.message) {
+              sendCodeErrorMsg = json.data?.description || json.message;
+            }
+          } else if (res.status() === 200) {
+            sendCodeSuccess = true;
+          }
         }
       } catch {}
     };
@@ -216,7 +226,7 @@ export async function executeAutoRegisterTikTokAccount(
     let codeSent = false;
     let captchaPrompted = false;
 
-    for (let wait = 0; wait < 30; wait++) {
+    for (let wait = 0; wait < 45; wait++) {
       await new Promise((r) => setTimeout(r, 1200));
 
       const status = await page.evaluate(() => {
@@ -225,8 +235,30 @@ export async function executeAutoRegisterTikTokAccount(
         const hasCaptcha = !!document.querySelector(
           "#captcha-verify-image, .captcha-disable-scroll, #secsdk-captcha-drag-wrapper, .captcha_verify_container, iframe[src*='captcha'], iframe[src*='secsdk']"
         );
-        return { isCountdown, hasCaptcha };
+        const errorText = texts.find((t) =>
+          t.includes("Too many attempts") ||
+          t.includes("Maximum number of attempts") ||
+          t.includes("quá nhiều lần") ||
+          t.includes("try again later")
+        );
+        return { isCountdown, hasCaptcha, errorText };
       });
+
+      if (status.errorText) {
+        await onLog(`⚠️ TikTok cảnh báo: "${status.errorText}"`, "WARN");
+      }
+
+      if (status.hasCaptcha) {
+        if (!captchaPrompted) {
+          captchaPrompted = true;
+          await page.bringToFront().catch(() => {});
+          await onLog(
+            "👉 [HÀNH ĐỘNG CẦN THIẾT]: TikTok hiện bảng ghép hình (Captcha) trên cửa sổ Chrome, bạn hãy lấy chuột kéo mảnh ghép vào đúng vị trí!",
+            "WARN"
+          );
+        }
+        continue;
+      }
 
       if (sendCodeSuccess || status.isCountdown) {
         codeSent = true;
@@ -234,13 +266,8 @@ export async function executeAutoRegisterTikTokAccount(
         break;
       }
 
-      if (status.hasCaptcha && !captchaPrompted) {
-        captchaPrompted = true;
-        await page.bringToFront().catch(() => {});
-        await onLog(
-          "👉 [HÀNH ĐỘNG CẦN THIẾT]: TikTok hiện bảng ghép hình (Captcha) trên cửa sổ trình duyệt, bạn hãy lấy chuột kéo mảnh ghép vào đúng vị trí!",
-          "WARN"
-        );
+      if (sendCodeErrorMsg && !captchaPrompted && wait > 5) {
+        await onLog(`⚠️ Phản hồi từ TikTok: "${sendCodeErrorMsg}". Vui lòng kiểm tra cửa sổ Chrome!`, "WARN");
       }
     }
 
