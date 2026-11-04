@@ -23,7 +23,7 @@ export async function fetchGmailOtpViaImap(
 
   while (Date.now() - startTime < timeoutMs) {
     try {
-      const code = await checkImapOnce(cleanUser, cleanPass);
+      const code = await checkImapOnce(cleanUser, cleanPass, startTime - 30000);
       if (code) {
         if (onLog) await onLog(`[IMAP] 🎯 Đã tìm thấy mã OTP TikTok: [${code}] từ hộp thư Gmail!`);
         return code;
@@ -39,7 +39,35 @@ export async function fetchGmailOtpViaImap(
   return null;
 }
 
-function checkImapOnce(user: string, pass: string): Promise<string | null> {
+export function extractTikTokOtpFromImap(buffer: string, minTimestamp?: number): string | null {
+  // Check Date or INTERNALDATE to avoid picking up old emails from hours/days ago
+  const dateMatch = buffer.match(/Date:\s*([^\r\n]+)/i) || buffer.match(/INTERNALDATE\s+"([^"]+)"/i);
+  if (dateMatch && minTimestamp) {
+    const msgDate = new Date(dateMatch[1]).getTime();
+    if (!isNaN(msgDate) && msgDate < minTimestamp) {
+      return null; // Old email, wait for fresh incoming email
+    }
+  }
+
+  // 1. Subject pattern: "048260 is your verification code" or "048260 là mã xác minh"
+  const subjMatch = buffer.match(/\b(\d{6})\b\s*(?:is your verification code|là mã xác minh|is your TikTok code)/i);
+  if (subjMatch) return subjMatch[1];
+
+  // 2. Specific TikTok phrase in body: "enter this code in TikTok: 048260" or "Verification Code ... 048260"
+  const phraseMatch = buffer.match(/(?:enter this code in TikTok|nhập mã này|Verification Code|Mã xác minh)[^0-9]{1,60}(\d{6})\b/i);
+  if (phraseMatch && phraseMatch[1] !== "000000" && phraseMatch[1] !== "111111") {
+    return phraseMatch[1];
+  }
+
+  // 3. Fallback: Any 6-digit number NOT preceded by '#' (not hex color like #000000) and NOT 000000
+  const matches = Array.from(buffer.matchAll(/(?<![#&a-zA-Z0-9])(\d{6})(?![a-zA-Z0-9])/g))
+    .map((m) => m[1])
+    .filter((digits) => digits !== "000000" && digits !== "111111" && !digits.startsWith("0000"));
+
+  return matches[0] || null;
+}
+
+function checkImapOnce(user: string, pass: string, minTimestamp?: number): Promise<string | null> {
   return new Promise((resolve, reject) => {
     const socket = tls.connect(
       {
@@ -94,7 +122,7 @@ function checkImapOnce(user: string, pass: string): Promise<string | null> {
                   latestMsgSeq = seqs[seqs.length - 1]; // newest message
                   buffer = "";
                   stage = "FETCHED";
-                  send(`FETCH ${latestMsgSeq} (BODY[TEXT])`);
+                  send(`FETCH ${latestMsgSeq} (INTERNALDATE BODY[HEADER.FIELDS (SUBJECT DATE)] BODY[TEXT])`);
                   return;
                 }
               }
@@ -103,12 +131,9 @@ function checkImapOnce(user: string, pass: string): Promise<string | null> {
               resolve(null);
             }
           } else if (stage === "FETCHED") {
-            const otpMatch =
-              buffer.match(/(?:code is|mã xác minh là|verification code is|TikTok code:?)\s*[:\-]?\s*(\d{6})/i) ||
-              buffer.match(/\b(\d{6})\b/);
-
-            if (otpMatch && otpMatch[1]) {
-              foundOtp = otpMatch[1];
+            const otp = extractTikTokOtpFromImap(buffer, minTimestamp);
+            if (otp) {
+              foundOtp = otp;
             }
 
             if (buffer.includes("OK Fetch completed") || buffer.includes("OK Success") || foundOtp) {
@@ -135,4 +160,3 @@ function checkImapOnce(user: string, pass: string): Promise<string | null> {
     );
   });
 }
-
