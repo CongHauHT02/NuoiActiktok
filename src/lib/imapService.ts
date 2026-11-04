@@ -149,8 +149,9 @@ export function extractTikTokOtpFromRaw(
   const dateMatch = rawHeaders.match(/Date:\s*([^\r\n]+)/i) || rawHeaders.match(/INTERNALDATE\s+"([^"]+)"/i);
   if (dateMatch && minTimestamp) {
     const msgDate = new Date(dateMatch[1]).getTime();
-    if (!isNaN(msgDate) && msgDate < minTimestamp - 600000) {
-      return null; // Ignore emails older than 10 mins
+    // Strictly reject emails that arrived before minTimestamp (allow at most 15s leeway for clock drift)
+    if (!isNaN(msgDate) && msgDate < minTimestamp - 15000) {
+      return null; // Ignore stale emails from previous runs
     }
   }
 

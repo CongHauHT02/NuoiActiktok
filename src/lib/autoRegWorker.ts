@@ -475,16 +475,32 @@ export async function executeAutoRegisterTikTokAccount(
       await page.keyboard.press("Enter");
     }
 
-    // 9. Wait for account creation & optional Username prompt
+    // 9. Wait for account creation, Captcha, & optional Username prompt
     let sessionCookie: any = null;
     let finalUsername = params.targetUsername || generateRandomUsername(email);
+    let captchaPromptedAfterNext = false;
 
-    await onLog("Đang đợi TikTok kích hoạt tài khoản & tạo phiên đăng nhập...", "INFO");
+    await onLog("Đang đợi TikTok xác thực OTP & kích hoạt tài khoản...", "INFO");
 
-    for (let check = 0; check < 15; check++) {
-      await new Promise((r) => setTimeout(r, 1200));
+    // Poll up to 35 iterations (~50 seconds) to allow ample time for Captcha or Username setup
+    for (let check = 0; check < 35; check++) {
+      await new Promise((r) => setTimeout(r, 1500));
 
-      // Check if username setup step appears
+      // A. Check if Captcha dialog appeared
+      const hasCaptcha = await page.evaluate(() => {
+        const el = document.querySelector(
+          '#captcha-verify-image, #secsdk-captcha-drag-wrapper, .captcha_verify_container, iframe[src*="captcha"], iframe[src*="secsdk"], div[class*="captcha-"]'
+        );
+        return !!el;
+      });
+
+      if (hasCaptcha && !captchaPromptedAfterNext) {
+        captchaPromptedAfterNext = true;
+        await page.bringToFront().catch(() => {});
+        await onLog("🧩 [HÀNH ĐỘNG CỦA BẠN]: TikTok đang hiện Bảng ghép hình Captcha! Hãy lấy chuột kéo mảnh ghép vào vị trí trên cửa sổ Chrome!", "WARN");
+      }
+
+      // B. Check if username setup step appears
       const usernameInput = await page.$('input[placeholder*="Username"], input[placeholder*="tên người dùng"]');
       if (usernameInput) {
         await onLog(`Thiết lập Username cho tài khoản: @${finalUsername}...`, "INFO");
@@ -496,10 +512,27 @@ export async function executeAutoRegisterTikTokAccount(
         if (finishBtn) await finishBtn.click();
       }
 
-      // Check if sessionid cookie is present
+      // C. Check if sessionid cookie is present
       const allCookies = await page.cookies();
       sessionCookie = allCookies.find((c) => c.name === "sessionid" || c.name === "sessionid_ss" || c.name === "sid_tt");
       if (sessionCookie) {
+        break;
+      }
+
+      // D. Check for visible rejection error (e.g., "Incorrect code", "Code expired")
+      const pageError = await page.evaluate(() => {
+        const errorNodes = Array.from(document.querySelectorAll('[role="alert"], [class*="error"], [class*="Error"], span[style*="red"], div[class*="tip"]'));
+        for (const n of errorNodes) {
+          const text = n.textContent?.trim();
+          if (text && text.length > 3 && text.length < 80 && !text.includes("birthday") && !text.includes("Characters") && !text.includes("Letters")) {
+            return text;
+          }
+        }
+        return null;
+      });
+
+      if (pageError && pageError.toLowerCase().includes("code") && check > 5) {
+        await onLog(`⚠️ TikTok thông báo lỗi mã xác thực: "${pageError}"`, "WARN");
         break;
       }
     }
