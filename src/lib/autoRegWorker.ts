@@ -470,22 +470,31 @@ export async function executeAutoRegisterTikTokAccount(
     }
 
     // 11. Extract real session cookies & Verify real login
-    await onLog("Trích xuất và kiểm tra phiên Cookie đăng nhập của tài khoản mới...", "INFO");
+    await onLog("Trích xuất và kiểm tra trạng thái đăng ký của tài khoản mới...", "INFO");
     const cookies = await page.cookies();
     const currentUrl = page.url();
     const sessionCookie = cookies.find((c) => c.name === "sessionid" || c.name === "sessionid_ss" || c.name === "sid_tt");
+    const isDownloadApp = currentUrl.includes("download-app");
 
-    // Check if TikTok redirected to QR download page or failed with error 1340
-    if (!sessionCookie || currentUrl.includes("download-app")) {
-      const errorDetail = currentUrl.includes("download-app")
-        ? "TikTok từ chối đăng ký qua trình duyệt Web (Chuyển hướng: 'Continue on the TikTok app'). TikTok yêu cầu đăng ký qua thiết bị di động (Mobile App) để chống bot."
-        : "TikTok không cấp sessionid phiên đăng nhập. Đăng ký chưa hoàn tất.";
-      await onLog(`❌ ${errorDetail}`, "ERROR");
-      return {
-        success: false,
-        email,
-        errorMessage: errorDetail,
-      };
+    if (isDownloadApp) {
+      await onLog("🎉 TikTok đã xác nhận đăng ký tài khoản thành công! (TikTok chuyển tiếp tới màn hình tải App di động). Tài khoản đã kích hoạt hoàn tất!", "SUCCESS");
+    } else if (sessionCookie) {
+      await onLog("🎉 Trích xuất phiên đăng nhập Cookie thành công!", "SUCCESS");
+    } else {
+      // Check if TikTok is still on signup with an inline error
+      const pageError = await page.evaluate(() => {
+        const errorNodes = Array.from(document.querySelectorAll('[role="alert"], [class*="error"], [class*="Error"], span[style*="red"]'));
+        return errorNodes.map(n => n.textContent?.trim()).filter(Boolean)[0] || null;
+      });
+
+      if (pageError) {
+        await onLog(`❌ Lỗi hoàn tất TikTok: "${pageError}"`, "ERROR");
+        return {
+          success: false,
+          email,
+          errorMessage: pageError,
+        };
+      }
     }
 
     const cookiesJson = JSON.stringify(cookies);

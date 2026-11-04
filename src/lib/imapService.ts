@@ -1,3 +1,5 @@
+// Memory set to prevent reusing the same OTP twice
+const usedOtpCodes = new Set<string>();
 import tls from "tls";
 
 /**
@@ -25,7 +27,7 @@ export async function fetchGmailOtpViaImap(
   while (Date.now() - startTime < timeoutMs) {
     attempt++;
     try {
-      const code = await checkImapSession(cleanUser, cleanPass, startTime - 120000, onLog);
+      const code = await checkImapSession(cleanUser, cleanPass, startTime - 15000, onLog);
       if (code) {
         if (onLog) await onLog(`[IMAP] 🎯 Đã tìm thấy mã OTP TikTok: [${code}] từ hộp thư Gmail!`);
         return code;
@@ -173,7 +175,8 @@ export function extractTikTokOtpFromRaw(
     subjLine.match(/(?:code|mã)[:\s]*\b(\d{6})\b/i) ||
     subjLine.match(/\b(\d{6})\b/);
 
-  if (subjOtpMatch && isValidOtp(subjOtpMatch[1])) {
+  if (subjOtpMatch && isValidOtp(subjOtpMatch[1]) && !usedOtpCodes.has(subjOtpMatch[1])) {
+    usedOtpCodes.add(subjOtpMatch[1]);
     return subjOtpMatch[1];
   }
 
@@ -185,7 +188,8 @@ export function extractTikTokOtpFromRaw(
 
   for (const regex of bodyPhrases) {
     const m = decodedBody.match(regex);
-    if (m && isValidOtp(m[1])) {
+    if (m && isValidOtp(m[1]) && !usedOtpCodes.has(m[1])) {
+      usedOtpCodes.add(m[1]);
       return m[1];
     }
   }
