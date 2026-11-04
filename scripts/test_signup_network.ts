@@ -29,11 +29,11 @@ async function testSignupNetwork() {
   // Listen to all network responses
   page.on("response", async (res) => {
     const url = res.url();
-    if (url.includes("passport") || url.includes("send_code") || url.includes("check_email")) {
+    if (url.includes("passport") || url.includes("send_code") || url.includes("check_email") || url.includes("signup") || url.includes("user")) {
       try {
         const text = await res.text();
         console.log(`\n[NET RESPONSE] Status: ${res.status()} URL: ${url.split("?")[0]}`);
-        console.log(`[NET BODY]: ${text.slice(0, 300)}`);
+        console.log(`[NET BODY]: ${text.slice(0, 400)}`);
       } catch (e: any) {
         console.log(`[NET ERROR reading body]: ${e.message}`);
       }
@@ -81,7 +81,7 @@ async function testSignupNetwork() {
   }
 
   // Fill Email
-  const testEmail = `d.oanconghau231020@gmail.com`;
+  const testEmail = `do.anco.ngha.ut@gmail.com`;
   console.log(`3. Filling Email: ${testEmail}...`);
   const emailInput = await page.$('input[placeholder*="Email address"], input[name="email"], input[type="text"]');
   if (emailInput) {
